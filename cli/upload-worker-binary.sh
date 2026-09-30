@@ -31,7 +31,7 @@ VERSION=${1:-$(git -C "${REPO_ROOT}" describe --tags --always --dirty)}
 if [[ -n "${GCS_PREFIX}" ]]; then
   DEFAULT_GCS_PATH="${GCS_PREFIX%/}/sprinkles-linux-amd64-${VERSION}"
 else
-  DEFAULT_GCS_PATH=${GCS_PATH:-gs://sprinkles-test-0625/bin/sprinkles-linux-amd64-${VERSION}}
+  DEFAULT_GCS_PATH=${GCS_PATH:-gs://sparkles-v100/bin/sprinkles-linux-amd64-${VERSION}}
 fi
 GCS_PATH=${2:-${DEFAULT_GCS_PATH}}
 

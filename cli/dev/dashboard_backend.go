@@ -222,26 +222,26 @@ type workpoolDetailResponse struct {
 	WorkpoolID string `json:"workpool_id"`
 	// ProjectID is empty when the workpool didn't override it, meaning its
 	// Batch jobs/VMs run in whichever project the backend was started with.
-	ProjectID                    string               `json:"project_id"`
-	MachineType                  string               `json:"machine_type"`
-	Region                       string               `json:"region"`
-	Zones                        []string             `json:"zones"`
-	RootDir                      string               `json:"root_dir"`
-	SprinklesWorkerGCSPath        string               `json:"sprinkles_worker_gcs_path"`
+	ProjectID                    string                    `json:"project_id"`
+	MachineType                  string                    `json:"machine_type"`
+	Region                       string                    `json:"region"`
+	Zones                        []string                  `json:"zones"`
+	RootDir                      string                    `json:"root_dir"`
+	SprinklesWorkerGCSPath       string                    `json:"sprinkles_worker_gcs_path"`
 	Resources                    []sprinkles.ResourceEntry `json:"resources"`
 	EmptyVolumes                 []sprinkles.EmptyVolume   `json:"empty_volumes"`
 	GCSMounts                    []sprinkles.GCSMount      `json:"gcs_mounts"`
-	Labels                       []labelResponse      `json:"labels"`
-	MaxWorkerCount               int                  `json:"max_worker_count"`
-	MaxPreemptibleWorkerAttempts int                  `json:"max_preemptible_worker_attempts"`
-	MaxWorkersPerRequest         int                  `json:"max_workers_per_request"`
-	MaxZombiesBeforeAbort        int                  `json:"max_zombies_before_abort"`
-	MaxConsecutiveFailedBatches  int                  `json:"max_consecutive_failed_batches"`
-	State                        string               `json:"state"`
-	StateMessage                 string               `json:"state_message"`
-	LastIncidentAt               *string              `json:"last_incident_at"`
-	IncidentCount                int                  `json:"incident_count"`
-	Expiry                       time.Time            `json:"expiry"`
+	Labels                       []labelResponse           `json:"labels"`
+	MaxWorkerCount               int                       `json:"max_worker_count"`
+	MaxPreemptibleWorkerAttempts int                       `json:"max_preemptible_worker_attempts"`
+	MaxWorkersPerRequest         int                       `json:"max_workers_per_request"`
+	MaxZombiesBeforeAbort        int                       `json:"max_zombies_before_abort"`
+	MaxConsecutiveFailedBatches  int                       `json:"max_consecutive_failed_batches"`
+	State                        string                    `json:"state"`
+	StateMessage                 string                    `json:"state_message"`
+	LastIncidentAt               *string                   `json:"last_incident_at"`
+	IncidentCount                int                       `json:"incident_count"`
+	Expiry                       time.Time                 `json:"expiry"`
 }
 
 func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Request) {
@@ -281,7 +281,7 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Region:                       wp.Region,
 		Zones:                        wp.Zones,
 		RootDir:                      wp.RootDir,
-		SprinklesWorkerGCSPath:        wp.SprinklesWorkerGCSPath,
+		SprinklesWorkerGCSPath:       wp.SprinklesWorkerGCSPath,
 		Resources:                    wp.Resources,
 		EmptyVolumes:                 wp.EmptyVolumes,
 		GCSMounts:                    wp.GCSMounts,
@@ -780,9 +780,9 @@ type submitTaskRequest struct {
 // submitJobRequest mirrors openapi's SubmitJobBody schema.
 type submitJobRequest struct {
 	Name            string                        `json:"name"`
-	Resources       []sprinkles.ResourceEntry          `json:"resources"`
+	Resources       []sprinkles.ResourceEntry     `json:"resources"`
 	FilesToLocalize []submitFileToLocalizeRequest `json:"filesToLocalize"`
-	Labels          []sprinkles.Label                  `json:"labels"`
+	Labels          []sprinkles.Label             `json:"labels"`
 	Tasks           []submitTaskRequest           `json:"tasks"`
 	Workpool        WorkpoolSpec                  `json:"workpool"`
 	ResultPath      string                        `json:"resultPath,omitempty"`
@@ -826,6 +826,12 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SprinklesConfig) {
 	if spec.GCSMounts == nil {
 		spec.GCSMounts = []sprinkles.GCSMount{}
 	}
+	if spec.Accelerators == nil {
+		spec.Accelerators = []sprinkles.Accelerator{}
+	}
+	if spec.ProvisionMode == "" {
+		spec.ProvisionMode = "spot"
+	}
 	if spec.Region == "" {
 		spec.Region = config.Region
 	}
@@ -845,10 +851,10 @@ func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SprinklesConfig) {
 		spec.VMShutdownGracePeriodSec = 600
 	}
 	if spec.MaxZombiesBeforeAbort == 0 {
-		spec.MaxZombiesBeforeAbort = 5
+		spec.MaxZombiesBeforeAbort = 3
 	}
 	if spec.MaxConsecutiveFailedBatches == 0 {
-		spec.MaxConsecutiveFailedBatches = 5
+		spec.MaxConsecutiveFailedBatches = 3
 	}
 	if spec.LingerTimeSec == 0 {
 		spec.LingerTimeSec = 600
@@ -897,6 +903,10 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'tasks' must contain at least one task")
 		return
 	}
+	if req.Workpool.ProvisionMode != "" && req.Workpool.ProvisionMode != "spot" && req.Workpool.ProvisionMode != "normal" && req.Workpool.ProvisionMode != "flex" {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "'workpool.provisionMode' must be one of 'spot', 'normal', or 'flex'")
+		return
+	}
 	for _, t := range req.Tasks {
 		if t.Image == "" {
 			writeError(w, http.StatusBadRequest, "BAD_REQUEST", "each task requires 'image'")
@@ -935,22 +945,24 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 
 	now := time.Now()
 	workpool := sprinkles.WorkPool{
-		WorkpoolID:            workpoolID,
-		ProjectID:             req.Workpool.ProjectID,
-		MachineType:           req.Workpool.MachineType,
-		BootDiskSizeGb:        req.Workpool.BootDiskSizeGb,
-		BootDiskType:          req.Workpool.BootDiskType,
-		RootDir:               req.Workpool.RootDir,
+		WorkpoolID:             workpoolID,
+		ProjectID:              req.Workpool.ProjectID,
+		MachineType:            req.Workpool.MachineType,
+		BootDiskSizeGb:         req.Workpool.BootDiskSizeGb,
+		BootDiskType:           req.Workpool.BootDiskType,
+		RootDir:                req.Workpool.RootDir,
 		SprinklesWorkerGCSPath: req.Workpool.SprinklesWorkerGCSPath,
-		ServiceAccount:        req.Workpool.ServiceAccount,
-		Resources:             req.Workpool.Resources,
-		EmptyVolumes:          req.Workpool.EmptyVolumes,
-		GCSMounts:             req.Workpool.GCSMounts,
-		Labels:                req.Workpool.Labels,
-		WorkpoolSpecHash:      workpoolSpecHash,
-		Expiry:                now.Add(7 * 24 * time.Hour),
-		Region:                req.Workpool.Region,
-		Zones:                 req.Workpool.Zones,
+		ServiceAccount:         req.Workpool.ServiceAccount,
+		Resources:              req.Workpool.Resources,
+		Accelerators:           req.Workpool.Accelerators,
+		ProvisionMode:          req.Workpool.ProvisionMode,
+		EmptyVolumes:           req.Workpool.EmptyVolumes,
+		GCSMounts:              req.Workpool.GCSMounts,
+		Labels:                 req.Workpool.Labels,
+		WorkpoolSpecHash:       workpoolSpecHash,
+		Expiry:                 now.Add(7 * 24 * time.Hour),
+		Region:                 req.Workpool.Region,
+		Zones:                  req.Workpool.Zones,
 
 		MaxWorkerCount:               req.Workpool.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: req.Workpool.MaxPreemptibleWorkerAttempts,
@@ -1174,13 +1186,13 @@ func jobSummaryToResponse(js *monitor.JobSummary) jobSummaryResponse {
 // ----- GET /api/v1/job/{job_id} -----
 
 type jobResponse struct {
-	JobID      string               `json:"job_id"`
-	Name       string               `json:"name"`
-	WorkpoolID string               `json:"workpool_id"`
-	CreatedAt  time.Time            `json:"created_at"`
-	TaskCount  int                  `json:"task_count"`
+	JobID      string                    `json:"job_id"`
+	Name       string                    `json:"name"`
+	WorkpoolID string                    `json:"workpool_id"`
+	CreatedAt  time.Time                 `json:"created_at"`
+	TaskCount  int                       `json:"task_count"`
 	Resources  []sprinkles.ResourceEntry `json:"resources"`
-	Labels     []labelResponse      `json:"labels"`
+	Labels     []labelResponse           `json:"labels"`
 }
 
 func (s *dashboardServer) handleGetJob(w http.ResponseWriter, r *http.Request) {
@@ -1434,21 +1446,21 @@ func (s *dashboardServer) handleGetJobSummaryHistory(w http.ResponseWriter, r *h
 // hand-written mirror would only be a second place to forget a field.
 
 type taskResponse struct {
-	TaskID         string              `json:"task_id"`
-	TaskIndex      int                 `json:"task_index"`
-	JobID          string              `json:"job_id"`
-	WorkpoolID     string              `json:"workpool_id"`
-	Status         string              `json:"status"`
-	Command        []string            `json:"command"`
-	DockerImage    string              `json:"docker_image"`
-	ResultPath     string              `json:"result_path,omitempty"`
-	LogPath        string              `json:"log_path,omitempty"`
-	OwningWorkerID string              `json:"owning_worker_id,omitempty"`
-	FailureReason  string              `json:"failure_reason,omitempty"`
-	Labels         []labelResponse     `json:"labels"`
-	ExitCode       *int                `json:"exit_code,omitempty"`
+	TaskID         string                   `json:"task_id"`
+	TaskIndex      int                      `json:"task_index"`
+	JobID          string                   `json:"job_id"`
+	WorkpoolID     string                   `json:"workpool_id"`
+	Status         string                   `json:"status"`
+	Command        []string                 `json:"command"`
+	DockerImage    string                   `json:"docker_image"`
+	ResultPath     string                   `json:"result_path,omitempty"`
+	LogPath        string                   `json:"log_path,omitempty"`
+	OwningWorkerID string                   `json:"owning_worker_id,omitempty"`
+	FailureReason  string                   `json:"failure_reason,omitempty"`
+	Labels         []labelResponse          `json:"labels"`
+	ExitCode       *int                     `json:"exit_code,omitempty"`
 	ResourceUsage  *sprinkles.ResourceUsage `json:"resource_usage,omitempty"`
-	VMConsoleURL   string              `json:"vm_console_url,omitempty"`
+	VMConsoleURL   string                   `json:"vm_console_url,omitempty"`
 }
 
 // instanceNameRe parses the custom "project/<project>/zone/<zone>/instance/<instance>"
@@ -1456,10 +1468,10 @@ type taskResponse struct {
 var instanceNameRe = regexp.MustCompile(`^project/([^/]+)/zone/([^/]+)/instance/([^/]+)$`)
 
 type taskSummaryResponse struct {
-	TaskID        string              `json:"task_id"`
-	TaskIndex     int                 `json:"task_index"`
-	Status        string              `json:"status"`
-	ExitCode      *int                `json:"exit_code,omitempty"`
+	TaskID        string                   `json:"task_id"`
+	TaskIndex     int                      `json:"task_index"`
+	Status        string                   `json:"status"`
+	ExitCode      *int                     `json:"exit_code,omitempty"`
 	ResourceUsage *sprinkles.ResourceUsage `json:"resource_usage,omitempty"`
 }
 

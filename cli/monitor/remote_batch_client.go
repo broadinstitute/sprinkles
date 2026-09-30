@@ -82,7 +82,7 @@ func (c *RemoteBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpe
 		Region:                spec.Region,
 		MachineType:           spec.MachineType,
 		VMCount:               spec.VMCount,
-		Preemptible:           spec.Preemptible,
+		Preemptible:           spec.ProvisionMode == "spot",
 		SprinklesWorkerGCSPath: spec.SprinklesWorkerGCSPath,
 		Command:               spec.Command,
 		EmptyVolumes:          spec.EmptyVolumes,

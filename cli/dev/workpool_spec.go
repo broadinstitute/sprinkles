@@ -30,6 +30,8 @@ type WorkpoolSpec struct {
 	Labels                []sprinkles.Label         `json:"labels"`
 	BootDiskSizeGb        int                  `json:"bootDiskSizeGb"`
 	BootDiskType          string               `json:"bootDiskType"`
+	Accelerators          []sprinkles.Accelerator `json:"accelerators"`
+	ProvisionMode         string               `json:"provisionMode"`
 
 	MaxWorkerCount               int `json:"maxWorkerCount"`
 	MaxPreemptibleWorkerAttempts int `json:"maxPreemptibleWorkerAttempts"`

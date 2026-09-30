@@ -50,6 +50,8 @@ type firestoreWorkPool struct {
 	Resources             []ResourceEntry `firestore:"resources"`
 	ServiceAccount        string          `firestore:"service_account"`
 	Labels                []Label         `firestore:"labels"`
+	Accelerators          []Accelerator   `firestore:"accelerators"`
+	ProvisionMode         string          `firestore:"provision_mode"`
 
 	MaxWorkerCount               int `firestore:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int `firestore:"max_preemptible_worker_attempts"`
@@ -85,6 +87,8 @@ func toWorkPool(f *firestoreWorkPool) *WorkPool {
 		Resources:                    f.Resources,
 		ServiceAccount:               f.ServiceAccount,
 		Labels:                       f.Labels,
+		Accelerators:                 f.Accelerators,
+		ProvisionMode:                f.ProvisionMode,
 		MaxWorkerCount:               f.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: f.MaxPreemptibleWorkerAttempts,
 		MaxWorkersPerRequest:         f.MaxWorkersPerRequest,

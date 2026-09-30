@@ -91,6 +91,10 @@ type WorkPool struct {
 	Resources             []ResourceEntry
 	ServiceAccount        string
 	Labels                []Label
+	Accelerators          []Accelerator
+	// ProvisionMode is the VM provisioning strategy: "spot" (default),
+	// "normal" (standard/on-demand), or "flex" (DWS Flex Start).
+	ProvisionMode string
 
 	// Provisioning parameters
 	MaxWorkerCount               int
@@ -207,6 +211,14 @@ type GCSMount struct {
 	MountOptions []string `firestore:"mount_options" json:"mountOptions"`
 }
 
+// Accelerator describes a GPU accelerator type and how many of that type to
+// attach to each worker VM. Field names and tags match sprinkles.Accelerator
+// so Firestore documents round-trip correctly.
+type Accelerator struct {
+	Type  string `firestore:"type"  json:"type"`
+	Count int    `firestore:"count" json:"count"`
+}
+
 // WorkerJobSpec holds all parameters needed to create a GCP Batch job for workers.
 type WorkerJobSpec struct {
 	WorkpoolID string
@@ -217,7 +229,10 @@ type WorkerJobSpec struct {
 	Region                string
 	MachineType           string
 	VMCount               int
-	Preemptible           bool
+	// ProvisionMode is the VM provisioning strategy: "spot" (default),
+	// "normal" (standard/on-demand), or "flex" (DWS Flex Start).
+	ProvisionMode         string
+	Accelerators          []Accelerator
 	SprinklesWorkerGCSPath string
 	Command               string
 	RootDir               string

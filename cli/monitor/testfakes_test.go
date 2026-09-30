@@ -123,7 +123,7 @@ func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec)
 		jobID:       jobID,
 		batchID:     spec.BatchID,
 		workpoolID:  spec.WorkpoolID,
-		preemptible: spec.Preemptible,
+		preemptible: spec.ProvisionMode == "spot",
 		status:      BatchJobStatusQueued,
 		activeVMs:   activeVMs,
 	}
@@ -134,7 +134,7 @@ func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec)
 		ProjectID:   spec.ProjectID,
 		WorkpoolID:  spec.WorkpoolID,
 		VMCount:     spec.VMCount,
-		Preemptible: spec.Preemptible,
+		Preemptible: spec.ProvisionMode == "spot",
 		Labels:      spec.Labels,
 	})
 

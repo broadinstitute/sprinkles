@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-PROJECT="${PROJECT:-sprinkles-test-0625}"
+PROJECT="${PROJECT:-sparkles-v100}"
 
 echo "Building sprinkles..."
 mkdir -p ./bin
@@ -20,7 +20,7 @@ procs:
   # same way it's deployed. Run "dev monitor" / "dev dashboard-backend"
   # separately if you need to restart just one of them.
   serve:
-    cmd: ["${SPARKLES}", "serve", "--project", "${PROJECT}", "--verbose"]
+    cmd: ["${SPRINKLES}", "serve", "--project", "${PROJECT}", "--verbose"]
     log: "monitor.log"
   frontend:
     cmd: ["bash", "-c", "cd ../dashboard && npm run dev"]

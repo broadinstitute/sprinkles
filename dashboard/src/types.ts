@@ -144,7 +144,7 @@ export interface WorkPoolDetail {
   region: string;
   zones: string[];
   root_dir: string;
-  sparkles_worker_gcs_path: string;
+  sprinkles_worker_gcs_path: string;
   resources: { name: string; value: number }[];
   empty_volumes: { mount_point: string; type: string; size_in_gb: number }[];
   labels: { name: string; value: string }[];

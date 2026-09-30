@@ -95,6 +95,7 @@ func runWorker(c *cli.Context) error {
 	workpoolID := c.String("workpool")
 	noGCP := c.Bool("no-gcp")
 	noDocker := c.Bool("no-docker")
+	useGPU := c.Bool("gpu")
 	bindMounts := c.StringSlice("bind-mount")
 	workDirParent := c.String("work-dir")
 
@@ -120,7 +121,7 @@ func runWorker(c *cli.Context) error {
 	lingerTime := time.Duration(c.Int("linger")) * time.Second
 	streamLogs := c.Bool("stream")
 
-	ws, err := startWorker(ctx, project, db, workerID, workpoolID, batchID, noGCP, noDocker, streamLogs, bindMounts, workDirParent, lingerTime)
+	ws, err := startWorker(ctx, project, db, workerID, workpoolID, batchID, noGCP, noDocker, streamLogs, useGPU, bindMounts, workDirParent, lingerTime)
 	if err != nil {
 		return err
 	}
@@ -234,6 +235,7 @@ type WorkerLoopConfig struct {
 	TransferClient        TransferClient
 	WorkDirParent         string
 	BindMounts            []string
+	UseGPU                bool
 	Registry              *taskRegistry
 	FSClient              *firestore.Client
 	ExecuteDockerCommand  func(ctx context.Context, imageName string, command []string, workDir string, extraDockerArgs []string, tel *TaskEventLog) (*ResourceUsage, error)
@@ -412,7 +414,7 @@ func executeTaskBody(ctx context.Context, cfg *WorkerLoopConfig, t *Task) error 
 	}
 
 	log.Printf("Prepared input files and the working dir %s", t.TaskID)
-	extraDockerArgs := buildDockerArgs(cfg.BindMounts, t)
+	extraDockerArgs := buildDockerArgs(cfg.BindMounts, cfg.UseGPU, t)
 	tel, err := OpenTaskEventLog(ctx, paths.logPath, t.TaskID, paths.taskWorkDir, cfg.FSClient)
 	if err != nil {
 		return fmt.Errorf("opening task event log for %s: %w", t.TaskID, err)
@@ -581,6 +583,7 @@ func (ws *workerState) mainLoop(ctx context.Context, resources *Resources) error
 		TransferClient:        ws.transferClient,
 		WorkDirParent:         ws.workDirParent,
 		BindMounts:            ws.bindMounts,
+		UseGPU:                ws.useGPU,
 		Registry:              ws.registry,
 		FSClient:              ws.fsClient,
 		ExecuteDockerCommand:  execFn,
@@ -652,6 +655,7 @@ type WorkerRunConfig struct {
 	Resources     string
 	NoGCP         bool
 	NoDocker      bool
+	UseGPU        bool
 	BindMounts    []string
 	WorkDirParent string
 	BatchID       string
@@ -669,7 +673,7 @@ func RunWorker(ctx context.Context, cfg WorkerRunConfig) error {
 	}
 
 	log.Printf("Starting worker %s in workpool %s", cfg.WorkerID, cfg.WorkpoolID)
-	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.BatchID, cfg.NoGCP, cfg.NoDocker, cfg.StreamLogs, cfg.BindMounts, cfg.WorkDirParent, cfg.LingerTime)
+	ws, err := startWorker(ctx, cfg.Project, cfg.DB, cfg.WorkerID, cfg.WorkpoolID, cfg.BatchID, cfg.NoGCP, cfg.NoDocker, cfg.StreamLogs, cfg.UseGPU, cfg.BindMounts, cfg.WorkDirParent, cfg.LingerTime)
 	if err != nil {
 		return fmt.Errorf("starting worker: %w", err)
 	}
@@ -819,10 +823,13 @@ func cleanupWorkDir(paths *TaskPaths) error {
 	return os.RemoveAll(paths.workDir)
 }
 
-func buildDockerArgs(bindMounts []string, _ *Task) []string {
+func buildDockerArgs(bindMounts []string, useGPU bool, _ *Task) []string {
 	var args []string
 	for _, bindMount := range bindMounts {
 		args = append(args, "-v", bindMount)
+	}
+	if useGPU {
+		args = append(args, "--gpus", "all")
 	}
 	return args
 }
@@ -840,6 +847,7 @@ type workerState struct {
 	workerID       string
 	workpoolID     string
 	bindMounts     []string
+	useGPU         bool
 	workDirParent  string
 	lingerTime     time.Duration
 	streamLogs     bool
@@ -853,7 +861,7 @@ func (ws *workerState) cleanup() {
 	ws.fsClient.Close()
 }
 
-func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker, streamLogs bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
+func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID string, noGCP, noDocker, streamLogs, useGPU bool, bindMounts []string, workDirParent string, lingerTime time.Duration) (*workerState, error) {
 	log.Printf("startWorker 1256")
 	var fsClient *firestore.Client
 	var err error
@@ -1016,6 +1024,7 @@ func startWorker(ctx context.Context, project, db, workerID, workpoolID, batchID
 		workerID:       workerID,
 		workpoolID:     workpoolID,
 		bindMounts:     bindMounts,
+		useGPU:         useGPU,
 		workDirParent:  workDirParent,
 		lingerTime:     lingerTime,
 		streamLogs:     streamLogs,

@@ -875,7 +875,7 @@ export default function JobList() {
           {/* ── Main content ── */}
           <div className="jl-main">
             <h1 className="jl-page-title">
-              sparkles
+              sprinkles
               {version && <span className="jl-page-version">{version}</span>}
               <Link to="/errors" className="jl-error-log-link">
                 Error Log
@@ -982,7 +982,7 @@ export default function JobList() {
               />
             </section>
 
-            <div className="jl-footer">◆ sparkles dashboard</div>
+            <div className="jl-footer">◆ sprinkles dashboard</div>
           </div>
 
           {/* ── Sidebar ── */}

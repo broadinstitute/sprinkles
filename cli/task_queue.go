@@ -77,6 +77,13 @@ type GCSMount struct {
 	MountOptions []string `firestore:"mount_options" json:"mountOptions"`
 }
 
+// Accelerator describes a GPU accelerator type and how many of that type to
+// attach to each worker VM.
+type Accelerator struct {
+	Type  string `firestore:"type"  json:"type"`
+	Count int    `firestore:"count" json:"count"`
+}
+
 type WorkPool struct {
 	WorkpoolID string `firestore:"workpool_id" json:"workpool_id"`
 	// ProjectID, if set, is the GCP project the Batch jobs (and therefore the
@@ -98,6 +105,14 @@ type WorkPool struct {
 	Expiry                time.Time       `firestore:"expiry" json:"expiry"`
 	Region                string          `firestore:"region" json:"region"`
 	Zones                 []string        `firestore:"zones" json:"zones"`
+	// Accelerators lists GPU accelerator types (and counts) to attach to
+	// each worker VM.
+	Accelerators []Accelerator `firestore:"accelerators" json:"accelerators"`
+	// ProvisionMode is the VM provisioning strategy: "spot" (default;
+	// dynamic spot/standard mixing driven by the monitor's zombie-incident
+	// budget), "normal" (always standard/on-demand), or "flex" (DWS Flex
+	// Start, for GPU machine types with limited on-demand capacity).
+	ProvisionMode string `firestore:"provision_mode" json:"provision_mode"`
 
 	// WorkpoolSpecHash is the sha256 (hex-encoded) of the canonical JSON of
 	// the WorkpoolSpec this record was created from, including Labels.

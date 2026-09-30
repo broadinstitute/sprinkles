@@ -61,7 +61,7 @@ func Command() cli.Command {
 					cli.StringFlag{Name: "project"},
 					cli.StringFlag{Name: "db", Value: defaultDB},
 					cli.IntFlag{Name: "vm-count", Value: 1, Usage: "number of VMs to provision"},
-					cli.BoolFlag{Name: "preemptible", Usage: "use SPOT/preemptible VMs"},
+					cli.StringFlag{Name: "provision-mode", Value: "spot", Usage: "VM provisioning mode: spot, normal, or flex"},
 				},
 				Action: runDevAddWorker,
 			},

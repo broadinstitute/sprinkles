@@ -103,20 +103,38 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 		return fmt.Errorf("list recent zombie incidents for workpool %s: %w", pool.WorkpoolID, err)
 	}
 
-	remainingPreemptible := max(0, pool.MaxPreemptibleWorkerAttempts-len(recentZombies))
-	preemptibleCount := min(toRequest, remainingPreemptible)
-	nonPreemptibleCount := toRequest - preemptibleCount
-
-	a.vlogf("monitor: submitting a batch request for %d preemptible VMs and %d nonpreemptible VMs (already requested %d)", preemptibleCount, nonPreemptibleCount, requestedCount)
-	if preemptibleCount > 0 {
-		if err := a.submitBatch(ctx, pool, preemptibleCount, true, now); err != nil {
-			return fmt.Errorf("submit preemptible batch: %w", err)
-		}
+	provisionMode := pool.ProvisionMode
+	if provisionMode == "" {
+		provisionMode = "spot"
 	}
 
-	if nonPreemptibleCount > 0 {
-		if err := a.submitBatch(ctx, pool, nonPreemptibleCount, false, now); err != nil {
-			return fmt.Errorf("submit non-preemptible batch: %w", err)
+	switch provisionMode {
+	case "normal":
+		a.vlogf("monitor: submitting a batch request for %d normal VMs (already requested %d)", toRequest, requestedCount)
+		if err := a.submitBatch(ctx, pool, toRequest, "normal", now); err != nil {
+			return fmt.Errorf("submit normal batch: %w", err)
+		}
+	case "flex":
+		a.vlogf("monitor: submitting a batch request for %d flex VMs (already requested %d)", toRequest, requestedCount)
+		if err := a.submitBatch(ctx, pool, toRequest, "flex", now); err != nil {
+			return fmt.Errorf("submit flex batch: %w", err)
+		}
+	default: // "spot"
+		remainingSpot := max(0, pool.MaxPreemptibleWorkerAttempts-len(recentZombies))
+		spotCount := min(toRequest, remainingSpot)
+		normalCount := toRequest - spotCount
+
+		a.vlogf("monitor: submitting a batch request for %d spot VMs and %d normal VMs (already requested %d)", spotCount, normalCount, requestedCount)
+		if spotCount > 0 {
+			if err := a.submitBatch(ctx, pool, spotCount, "spot", now); err != nil {
+				return fmt.Errorf("submit spot batch: %w", err)
+			}
+		}
+
+		if normalCount > 0 {
+			if err := a.submitBatch(ctx, pool, normalCount, "normal", now); err != nil {
+				return fmt.Errorf("submit normal batch: %w", err)
+			}
 		}
 	}
 
@@ -124,7 +142,7 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 }
 
 // submitBatch creates a BatchAPIRequest in Firestore and the corresponding GCP Batch API job.
-func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, preemptible bool, now time.Time) error {
+func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, provisionMode string, now time.Time) error {
 	batchID := CreateBatchID()
 
 	jobID, err := a.batchAPI.CreateJob(ctx, &WorkerJobSpec{
@@ -134,7 +152,8 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		Region:                pool.Region,
 		MachineType:           pool.MachineType,
 		VMCount:               vmCount,
-		Preemptible:           preemptible,
+		ProvisionMode:         provisionMode,
+		Accelerators:          pool.Accelerators,
 		RootDir:               pool.RootDir,
 		SprinklesWorkerGCSPath: pool.SprinklesWorkerGCSPath,
 		EmptyVolumes:          pool.EmptyVolumes,
@@ -161,7 +180,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		ProjectID:       pool.ProjectID,
 		WorkpoolID:      pool.WorkpoolID,
 		ExpectedVMCount: vmCount,
-		Preemptible:     preemptible,
+		Preemptible:     provisionMode == "spot",
 		SubmittedAt:     now,
 		Expiry:          now.Add(7 * 24 * time.Hour),
 		Status:          BatchStatusPending,

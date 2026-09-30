@@ -40,6 +40,7 @@ func NewApp() *cli.App {
 				cli.BoolFlag{Name: "no-docker", Usage: "run task commands directly without Docker (ignores image name)"},
 				cli.StringSliceFlag{Name: "bind-mount", Usage: "additional Docker bind mounts (host:container), may be repeated"},
 				cli.StringFlag{Name: "work-dir", Usage: "parent directory for task working directories (default: OS temp dir)"},
+				cli.BoolFlag{Name: "gpu", Usage: "pass --gpus all to docker when running task containers (set on GPU worker VMs)"},
 			},
 			Action: runWorker,
 		},

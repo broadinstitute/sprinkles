@@ -13,7 +13,7 @@ function parseBreadcrumbs(
   jobNames: Record<string, string>
 ): BreadcrumbSegment[] {
   const segs = pathname.split("/").filter(Boolean);
-  const items: BreadcrumbSegment[] = [{ label: "sparkles", href: "/" }];
+  const items: BreadcrumbSegment[] = [{ label: "sprinkles", href: "/" }];
 
   if (segs[0] === "jobs" && segs[1]) {
     const jobId = segs[1];

@@ -22,7 +22,10 @@ func runDevAddWorker(c *cli.Context) error {
 	}
 	db := c.String("db")
 	vmCount := c.Int("vm-count")
-	preemptible := c.Bool("preemptible")
+	provisionMode := c.String("provision-mode")
+	if provisionMode != "spot" && provisionMode != "normal" && provisionMode != "flex" {
+		return fmt.Errorf("--provision-mode must be one of 'spot', 'normal', or 'flex', got %q", provisionMode)
+	}
 
 	workpoolSpec, err := readJSON[WorkpoolSpec](specFile)
 	if err != nil {
@@ -48,7 +51,8 @@ func runDevAddWorker(c *cli.Context) error {
 		Region:                workpoolSpec.Region,
 		MachineType:           workpoolSpec.MachineType,
 		VMCount:               vmCount,
-		Preemptible:           preemptible,
+		ProvisionMode:         provisionMode,
+		Accelerators:          toMonitorAccelerators(workpoolSpec.Accelerators),
 		RootDir:               workpoolSpec.RootDir,
 		SprinklesWorkerGCSPath: workpoolSpec.SprinklesWorkerGCSPath,
 		EmptyVolumes:          toMonitorEmptyVolumes(workpoolSpec.EmptyVolumes),
@@ -78,7 +82,7 @@ func runDevAddWorker(c *cli.Context) error {
 		ProjectID:       workpoolSpec.ProjectID,
 		WorkpoolID:      workpoolID,
 		ExpectedVMCount: vmCount,
-		Preemptible:     preemptible,
+		Preemptible:     provisionMode == "spot",
 		SubmittedAt:     now,
 		Expiry:          now.Add(7 * 24 * time.Hour),
 		Status:          monitor.BatchStatusPending,
@@ -119,6 +123,16 @@ func toMonitorEmptyVolumes(vs []sprinkles.EmptyVolume) []monitor.EmptyVolume {
 			Type:       v.Type,
 			SizeInGB:   v.SizeInGB,
 		}
+	}
+	return out
+}
+
+// toMonitorAccelerators converts sprinkles.Accelerator to monitor.Accelerator.
+// The two types have identical field names and Firestore tags by design.
+func toMonitorAccelerators(as []sprinkles.Accelerator) []monitor.Accelerator {
+	out := make([]monitor.Accelerator, len(as))
+	for i, a := range as {
+		out[i] = monitor.Accelerator{Type: a.Type, Count: a.Count}
 	}
 	return out
 }

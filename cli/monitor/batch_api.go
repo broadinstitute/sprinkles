@@ -210,6 +210,22 @@ func gcpJobLabels(spec *WorkerJobSpec) map[string]string {
 	return labels
 }
 
+// gpuMachinePrefixes are the machine type prefixes whose instances always
+// have GPUs pre-attached (A and G series), and so need no explicit
+// Accelerators entry to require GPU driver installation.
+var gpuMachinePrefixes = []string{"a2-", "a3-", "a4-", "g2-", "g4-"}
+
+// machineTypeHasGPU reports whether machineType belongs to one of the A/G
+// series families that always have GPUs pre-attached.
+func machineTypeHasGPU(machineType string) bool {
+	for _, p := range gpuMachinePrefixes {
+		if strings.HasPrefix(machineType, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	if len(spec.Resources) == 0 {
 		return "", fmt.Errorf("workpool %s has no resources configured", spec.WorkpoolID)
@@ -254,9 +270,25 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		}
 	}
 
-	provisioningModel := "STANDARD"
-	if spec.Preemptible {
+	useGPU := len(spec.Accelerators) > 0 || machineTypeHasGPU(spec.MachineType)
+
+	var provisioningModel, reservation string
+	switch spec.ProvisionMode {
+	case "flex":
+		provisioningModel = "FLEX_START"
+		reservation = "NO_RESERVATION"
+	case "normal":
+		provisioningModel = "STANDARD"
+	default: // "spot"
 		provisioningModel = "SPOT"
+	}
+
+	batchAccelerators := make([]*batch.Accelerator, 0, len(spec.Accelerators))
+	for _, a := range spec.Accelerators {
+		batchAccelerators = append(batchAccelerators, &batch.Accelerator{
+			Type:  a.Type,
+			Count: int64(a.Count),
+		})
 	}
 
 	disks := make([]*batch.AttachedDisk, 0, len(spec.EmptyVolumes))
@@ -293,6 +325,9 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 	// in another project.
 	workerArgs := fmt.Sprintf("--stream --batch %s --project %s --db %s --workpool %s --work-dir %s --resources %s --linger %d", spec.BatchID, c.project, spec.DBName, spec.WorkpoolID, spec.RootDir, formatResources(spec.Resources), spec.LingerTime/time.Second) +
 		formatBindMountArgs(spec.RootDir, spec.EmptyVolumes, gcsMounts)
+	if useGPU {
+		workerArgs += " --gpu"
+	}
 	log.Printf("worker args: %s", workerArgs)
 
 	job := &batch.Job{
@@ -331,11 +366,14 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 		AllocationPolicy: &batch.AllocationPolicy{
 			Instances: []*batch.InstancePolicyOrTemplate{
 				{
+					InstallGpuDrivers: useGPU,
 					Policy: &batch.InstancePolicy{
-						BootDisk:          &batch.Disk{SizeGb: int64(spec.BootDiskSizeGb), Type: spec.BootDiskType},
+						BootDisk:          &batch.Disk{SizeGb: int64(spec.BootDiskSizeGb), Type: spec.BootDiskType, Image: "batch-debian"},
 						MachineType:       spec.MachineType,
 						ProvisioningModel: provisioningModel,
+						Reservation:       reservation,
 						Disks:             disks,
+						Accelerators:      batchAccelerators,
 					},
 				},
 			},

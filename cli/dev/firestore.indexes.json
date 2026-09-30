@@ -8,6 +8,14 @@
     ]
   },
   {
+    "collection": "BatchAPIRequests",
+    "fields": [
+      { "field": "status", "order": "ASCENDING" },
+      { "field": "workpool_id", "order": "ASCENDING" },
+      { "field": "submitted_at", "order": "DESCENDING" }
+    ]
+  },
+  {
     "collection": "Workers",
     "fields": [
       { "field": "status", "order": "ASCENDING" },
