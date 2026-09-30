@@ -2,9 +2,11 @@
 
 The autoscaler has two responsibilities:
 
-1. **Provisioning** — continuously compare the number of pending tasks against the number of active workers, and
-   submit BatchAPI requests to bring the worker count up to meet demand. It prefers preemptible VMs up to a
-   configurable limit, then falls back to non-preemptible VMs for the remainder.
+1. **Provisioning** — continuously compare the number of pending tasks against the number of already-requested
+   workers, and submit BatchAPI requests to bring the worker count up to meet demand. Each workpool has a
+   `provision_mode` of `spot` (default), `normal`, or `flex`. In `spot` mode it prefers spot VMs up to a
+   configurable zombie-incident budget, then falls back to normal (on-demand) VMs for the remainder; `normal`
+   and `flex` request VMs in that mode directly, with no spot/normal split.
 
 2. **Watchdog** — monitor the health of running batches and workers, detect anomalies (startup failures, zombies,
    over-provisioning, stuck jobs), take corrective action, and communicate the workpool's health status to the user.
@@ -50,11 +52,13 @@ These are properties of the `WorkPools` collection so they can be tuned per work
 
 **Provisioning parameters:**
 
-| Field                             | Default | Description                                                                    |
-| --------------------------------- | ------- | ------------------------------------------------------------------------------ |
-| `max_worker_count`                | —       | Hard cap on total simultaneous workers for this workpool                       |
-| `max_preemptible_worker_attempts` | —       | Total number of preemptible VMs to attempt before switching to non-preemptible |
-| `max_workers_per_request`         | 100     | Maximum VMs to request in a single BatchAPIRequest                             |
+| Field                             | Default | Description                                                                                                                                                                                |
+| --------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `max_worker_count`                | —       | Hard cap on total simultaneous workers for this workpool                                                                                                                                   |
+| `max_preemptible_worker_attempts` | —       | Rolling 1-hour budget of zombie incidents tolerated in `spot` provision mode before falling back to `normal`                                                                               |
+| `max_workers_per_request`         | 100     | Maximum VMs to request in a single BatchAPIRequest                                                                                                                                         |
+| `provision_mode`                  | `spot`  | VM provisioning strategy: `spot` (spot/normal mixing per the budget above), `normal` (always on-demand), or `flex` (DWS Flex Start, for GPU machine types with limited on-demand capacity) |
+| `accelerators`                    | —       | GPU accelerator types (and counts) to attach to each worker VM; empty means no GPU                                                                                                         |
 
 **Watchdog parameters:**
 
@@ -127,7 +131,7 @@ stateDiagram-v2
 | `submitted_at`            | timestamp | When the Batch API request was created                                                                                                                    |
 | `running_since`           | timestamp | When the Batch API job was first observed `RUNNING`; null while `QUEUED`/`SCHEDULED`. Startup grace is measured from here, not `submitted_at`             |
 | `registered_worker_count` | int       | Monotonic count of workers that have _ever_ registered for this batch. Incremented atomically at registration; never decremented (it is not a live count) |
-| `preemptible`             | bool      | Whether the VMs in this batch are preemptible                                                                                                             |
+| `preemptible`             | bool      | Whether the VMs in this batch were requested as spot (`true` when this batch's provision mode is `spot`, `false` for `normal`/`flex`)                     |
 | `status`                  | string    | Lifecycle — see table below                                                                                                                               |
 | `unhealthy`               | bool      | Sticky flag; set whenever the watchdog acts on an anomaly. **Independent of `status`** — never cleared                                                    |
 
@@ -181,10 +185,12 @@ def record_incident(workpool, message):
 
 ## Autoscaler Poll (runs every 1 minute)
 
-Compares pending task demand against active worker supply and submits BatchAPIRequests to close the gap.
-Preemptible VMs are preferred until the workpool's preemptible budget is exhausted, then non-preemptible
-VMs are used for the remainder. A single poll may produce up to two BatchAPIRequests (one preemptible, one
-non-preemptible) if the budget boundary falls within the current request.
+Compares pending task demand against already-_requested_ worker supply (VMs pending or started, not yet
+necessarily heartbeating — see note below) and submits BatchAPIRequests to close the gap. In `spot` provision
+mode, spot VMs are preferred until the workpool's zombie-incident budget is exhausted, then normal (on-demand)
+VMs are used for the remainder; a single poll may produce up to two BatchAPIRequests (one spot, one normal) if
+the budget boundary falls within the current request. In `normal` or `flex` provision mode, one BatchAPIRequest
+is submitted for the full amount, in that mode, with no spot/normal split.
 
 ```
 for each WorkPool:
@@ -193,13 +199,15 @@ for each WorkPool:
         continue
 
     # How many workers are needed?
-    pending_tasks  = count of Tasks where workpool_id == workpool.workpool_id
-                                      and status == "pending"
-    active_workers = count of Workers where workpool_id == workpool.workpool_id
-                                        and heartbeat_expiry > now
+    pending_tasks   = count of Tasks where workpool_id == workpool.workpool_id
+                                       and status == "pending"
+    requested_count = sum(b.expected_vm_count
+                          for b in BatchAPIRequests
+                          where workpool_id == workpool.workpool_id
+                            and status in ("pending", "started"))
 
     target = min(workpool.max_worker_count, pending_tasks)
-    needed = max(0, target - active_workers)
+    needed = max(0, target - requested_count)
 
     if needed == 0:
         continue
@@ -207,24 +215,38 @@ for each WorkPool:
     # Respect the per-request cap
     to_request = min(needed, workpool.max_workers_per_request)
 
-    # Determine how much of the preemptible budget remains
-    preemptible_attempted = sum(b.expected_vm_count
-                                for b in BatchAPIRequests
-                                where workpool_id == workpool.workpool_id
-                                  and preemptible == true)
-    remaining_preemptible = max(0, workpool.max_preemptible_worker_attempts - preemptible_attempted)
+    provision_mode = workpool.provision_mode or "spot"
 
-    preemptible_count     = min(to_request, remaining_preemptible)
-    non_preemptible_count = to_request - preemptible_count
+    # submit_batch(vm_count, mode) both calls the Batch API to create a GCP Batch job
+    # for vm_count worker VMs (carrying workpool.accelerators and mode's provisioning
+    # model — SPOT/STANDARD/FLEX_START) and records a BatchAPIRequest(expected_vm_count=vm_count,
+    # preemptible=(mode == "spot")) so future polls count it against requested_count.
 
-    if preemptible_count > 0:
-        create BatchAPIRequest(preemptible=true, expected_vm_count=preemptible_count, ...)
-        set workpool.status = "ok" if workpool.status == "idle"
+    if provision_mode == "normal":
+        submit_batch(to_request, "normal")
+    elif provision_mode == "flex":
+        submit_batch(to_request, "flex")
+    else:  # "spot"
+        # Determine how much of the spot (zombie-incident) budget remains
+        recent_zombies = count of Events where workpool_id == workpool.workpool_id
+                                            and type == "zombie"
+                                            and timestamp > now - 1 hour
+        remaining_spot = max(0, workpool.max_preemptible_worker_attempts - recent_zombies)
 
-    if non_preemptible_count > 0:
-        create BatchAPIRequest(preemptible=false, expected_vm_count=non_preemptible_count, ...)
-        set workpool.status = "ok" if workpool.status == "idle"
+        spot_count   = min(to_request, remaining_spot)
+        normal_count = to_request - spot_count
+
+        if spot_count > 0:
+            submit_batch(spot_count, "spot")
+
+        if normal_count > 0:
+            submit_batch(normal_count, "normal")
+
+    set workpool.status = "ok" if workpool.status == "idle"
 ```
+
+Counting already-_requested_ VMs (rather than live, heartbeating `Workers`) avoids double-provisioning while a
+just-submitted batch's VMs are still booting and haven't registered a worker yet.
 
 Note: the Provisioning Guard (`workpool.status == "halted"`) is checked at the top of the loop rather than
 inside a separate function, since the autoscaler poll is the only call site for new BatchAPIRequests.

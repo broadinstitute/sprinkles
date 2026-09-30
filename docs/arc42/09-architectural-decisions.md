@@ -77,14 +77,20 @@ check that they stay aligned.
 
 ## AD-7: Preemptible-first provisioning with a hard fallback budget
 
-**Decision**: the provisioning poll requests preemptible VMs up to
-`MaxPreemptibleWorkerAttempts` per workpool, then falls back to
+**Decision**: each workpool has a `ProvisionMode` of `spot` (default),
+`normal`, or `flex`. In `spot` mode, the provisioning poll requests spot
+VMs up to `MaxPreemptibleWorkerAttempts` per workpool, then falls back to
 on-demand VMs, splitting a single demand delta across two
 `BatchAPIRequest`s when the attempt budget boundary falls mid-request
-(`autoscaler.md`).
-**Rationale**: balances cost savings (preemptible is cheaper) against a
+(`autoscaler.md`); `normal` always requests on-demand VMs with no split,
+and `flex` requests VMs under GCP Batch's DWS Flex Start provisioning
+model — useful for GPU-heavy machine types (A2/A3/A4) with limited
+on-demand capacity.
+**Rationale**: balances cost savings (spot is cheaper) against a
 guarantee of forward progress (on-demand VMs aren't subject to
-preemption).
+preemption); `flex` exists because some GPU machine types can't reliably
+get on-demand capacity at all, making Flex Start queuing the only
+practical way to provision them.
 
 ## AD-8: Every GCP dependency behind a narrow interface, with fakes/emulators
 

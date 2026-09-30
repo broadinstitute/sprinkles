@@ -330,6 +330,8 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
     "zones": ["string"],
     "serviceAccount": "string (default: SprinklesConfig.service_account)",
     "labels": [{ "name": "string", "value": "string" }],
+    "accelerators": [{ "type": "string", "count": "integer" }],
+    "provisionMode": "string: spot|normal|flex (default: spot)",
     "maxWorkerCount": "integer (default: 1)",
     "maxPreemptibleWorkerAttempts": "integer (default: 1)",
     "maxWorkersPerRequest": "integer (default: 25)",
@@ -342,6 +344,16 @@ Submit a new job. Creates the `WorkPool` (if it doesn't already exist), the `Job
 ```
 
 The decoder rejects unknown fields (`400`), at any nesting level.
+
+`accelerators` lists GPU accelerator types to attach to each worker VM, e.g. `[{"type": "nvidia-tesla-t4", "count": 1}]`. Machine types in the A2/A3/A4/G2/G4 families have GPUs pre-attached and need no explicit `accelerators` entry; N1 machine types need one. Omitting `accelerators` (or passing an empty list) requests no GPU. Whichever way GPU use is determined, the workpool's boot disk image is always Batch's `batch-debian` image (not `batch-cos`) and `install_gpu_drivers` is set on the Batch job whenever a GPU is in use — see `machineTypeHasGPU`/`CreateJob` in `cli/monitor/batch_api.go`.
+
+`provisionMode` selects the worker VMs' provisioning strategy:
+
+| Value            | Batch API provisioning model                       | Notes                                                                                                                                                                |
+| ---------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spot` (default) | `SPOT`, falling back to `STANDARD`                 | The monitor's existing rolling budget (`maxPreemptibleWorkerAttempts` over the last hour of zombie incidents) decides the spot/standard split per provisioning poll. |
+| `normal`         | `STANDARD`                                         | Always on-demand; no spot/standard split.                                                                                                                            |
+| `flex`           | `FLEX_START` (with `reservation = NO_RESERVATION`) | DWS Flex Start queuing, useful for GPU-heavy machine types (A2/A3/A4) with limited on-demand capacity.                                                               |
 
 If `workpool.id` is omitted, it's derived deterministically as `"wp-" + sha256(canonical JSON of the resolved workpool spec)[:20]` — submitting the same workpool spec twice (without an explicit `id`) reuses the same workpool. Either way the resolved ID must match `^[a-z][a-z0-9-]{0,34}$` or the request is rejected. `workpool_spec_hash` (see `datamodel.md`) is computed and stored on the `WorkPools` document at this point too.
 

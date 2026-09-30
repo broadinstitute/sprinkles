@@ -210,7 +210,7 @@ components:
             of `Label`; also copied onto every `BatchAPIRequest` created for this
             workpool (`BatchAPIRequest.Labels`) and onto the GCE VM labels of the
             underlying GCP Batch job (`gcpJobLabels` in v100/monitor/batch_api.go,
-            alongside the reserved `sparkles-workpool` label). Also folded into the
+            alongside the reserved `sprinkles-workpool` label). Also folded into the
             workpool's spec hash (see `id` above and `WorkPool.WorkpoolSpecHash`), so
             two specs differing only in labels resolve to different workpools when
             `id` is omitted.
@@ -223,9 +223,9 @@ components:
             `EmptyVolume` struct (v100/task_queue.go).
           items:
             $ref: "#/components/schemas/EmptyVolume"
-        sparklesWorkerGCSPath:
+        sprinklesWorkerGCSPath:
           type: string
-          description: GCS path to the sparkles-worker binary/image that worker VMs bootstrap from.
+          description: GCS path to the sprinkles-worker binary/image that worker VMs bootstrap from.
         lingerTimeSec:
           type: number
           description: |-
@@ -275,6 +275,45 @@ components:
             the monitor will tolerate before aborting the workpool. A value of 0 tells the
             monitor to use its own built-in default. Stored as
             `WorkPool.MaxConsecutiveFailedBatches` (firestore field `max_consecutive_failed_batches`).
+        accelerators:
+          type: array
+          description: |-
+            GPU accelerator types (and counts) to attach to each worker VM. Machine
+            types in the A2/A3/A4/G2/G4 families have GPUs pre-attached and don't need
+            an entry here (see `machineTypeHasGPU`); N1 machine types do. Omitted or
+            empty means no GPU. Stored as `WorkPool.Accelerators` (firestore field
+            `accelerators`).
+          items:
+            $ref: "#/components/schemas/Accelerator"
+        provisionMode:
+          type: string
+          enum: [spot, normal, flex]
+          description: |-
+            VM provisioning strategy. Defaults to `spot` if omitted (see
+            `applyWorkpoolDefaults`). `spot` mixes spot/on-demand VMs per
+            `maxPreemptibleWorkerAttempts`; `normal` always requests on-demand VMs;
+            `flex` requests VMs under GCP Batch's DWS Flex Start provisioning model,
+            useful for GPU machine types with limited on-demand capacity. Stored as
+            `WorkPool.ProvisionMode` (firestore field `provision_mode`).
+          example: spot
+
+    Accelerator:
+      type: object
+      description: |-
+        A GPU accelerator type and how many of that type to attach to each worker
+        VM. Corresponds to Go's `Accelerator` struct (cli/task_queue.go).
+      required:
+        - type
+        - count
+      properties:
+        type:
+          type: string
+          description: GPU accelerator type (e.g. `nvidia-tesla-t4`).
+          example: nvidia-tesla-t4
+        count:
+          type: integer
+          description: Number of accelerators of this type to attach.
+          example: 1
 
     EmptyVolume:
       type: object
