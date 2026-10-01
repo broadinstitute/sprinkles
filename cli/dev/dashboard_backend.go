@@ -38,6 +38,8 @@ type dashboardServer struct {
 	ps       *pubsub.Client
 	config   *SprinklesConfig
 	errorLog *monitor.ErrorLog
+	// pollerStats is nil when no monitor runs in this process.
+	pollerStats *monitor.PollerStats
 }
 
 // sprinklesConfigCollection is the Firestore collection holding SprinklesConfig
@@ -1661,6 +1663,71 @@ func (s *dashboardServer) handleListErrors(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"errors": out})
 }
 
+// ----- GET /api/v1/monitor/status -----
+
+type monitorPollerStatus struct {
+	Name                string           `json:"name"`
+	MaxIntervalSeconds  float64          `json:"max_interval_seconds"`
+	Runs                int64            `json:"runs"`
+	NotificationRuns    int64            `json:"notification_runs"`
+	TimerRuns           int64            `json:"timer_runs"`
+	Failures            int64            `json:"failures"`
+	ConsecutiveFailures int64            `json:"consecutive_failures"`
+	LastStarted         *time.Time       `json:"last_started"`
+	LastFinished        *time.Time       `json:"last_finished"`
+	LastSuccess         *time.Time       `json:"last_success"`
+	LastDurationMs      int64            `json:"last_duration_ms"`
+	LastError           string           `json:"last_error"`
+	LastErrorAt         *time.Time       `json:"last_error_at"`
+	Counters            map[string]int64 `json:"counters"`
+}
+
+type monitorStatusResponse struct {
+	// Available is false when no monitor runs in this process (standalone
+	// dev dashboard-backend), in which case the other fields are empty.
+	Available bool                  `json:"available"`
+	StartedAt *time.Time            `json:"started_at"`
+	Pollers   []monitorPollerStatus `json:"pollers"`
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// handleGetMonitorStatus summarizes what the monitor's background pollers
+// have been doing, from the monitor's in-memory PollerStats (so it resets
+// when the process restarts).
+func (s *dashboardServer) handleGetMonitorStatus(w http.ResponseWriter, r *http.Request) {
+	resp := monitorStatusResponse{Pollers: []monitorPollerStatus{}}
+	if s.pollerStats != nil {
+		snap := s.pollerStats.Snapshot()
+		resp.Available = true
+		resp.StartedAt = timePtr(snap.StartedAt)
+		for _, p := range snap.Pollers {
+			resp.Pollers = append(resp.Pollers, monitorPollerStatus{
+				Name:                p.Name,
+				MaxIntervalSeconds:  p.MaxInterval.Seconds(),
+				Runs:                p.Runs,
+				NotificationRuns:    p.NotificationRuns,
+				TimerRuns:           p.TimerRuns,
+				Failures:            p.Failures,
+				ConsecutiveFailures: p.ConsecutiveFailures,
+				LastStarted:         timePtr(p.LastStarted),
+				LastFinished:        timePtr(p.LastFinished),
+				LastSuccess:         timePtr(p.LastSuccess),
+				LastDurationMs:      p.LastDuration.Milliseconds(),
+				LastError:           p.LastError,
+				LastErrorAt:         timePtr(p.LastErrorAt),
+				Counters:            p.Counters,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ----- GET /api/v1/task/{task_id}/log -----
 
 // taskLogEntry is the unified JSON shape for both log_update and
@@ -2113,7 +2180,7 @@ func runDevDashboardBackend(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
-	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, nil)
+	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -2147,6 +2214,7 @@ func NewDashboardHandler(
 	psClient *pubsub.Client,
 	prefix string,
 	errorLog *monitor.ErrorLog,
+	pollerStats *monitor.PollerStats,
 ) (http.Handler, error) {
 	config, err := loadSprinklesConfig(ctx, fsClient)
 	if err != nil {
@@ -2161,11 +2229,12 @@ func NewDashboardHandler(
 	}
 
 	srv := &dashboardServer{
-		project:  project,
-		fs:       fsClient,
-		ps:       psClient,
-		config:   config,
-		errorLog: errorLog,
+		project:     project,
+		fs:          fsClient,
+		ps:          psClient,
+		config:      config,
+		errorLog:    errorLog,
+		pollerStats: pollerStats,
 	}
 
 	mux := http.NewServeMux()
@@ -2207,6 +2276,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/version", srv.handleGetVersion)
 	handle("GET /api/v1/metrics", srv.handleGetMetrics)
 	handle("GET /api/v1/errors", srv.handleListErrors)
+	handle("GET /api/v1/monitor/status", srv.handleGetMonitorStatus)
 	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
 	handle("GET /api/v1/events", srv.handleListEvents)
 	handle("POST /api/v1/subscriptions", srv.handleCreateSubscription)

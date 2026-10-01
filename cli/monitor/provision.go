@@ -189,5 +189,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 	if err := a.batches.Create(ctx, batch); err != nil {
 		return fmt.Errorf("save batch record: %w", err)
 	}
+	a.stats.Add(PollerProvisioning, "batches_submitted", 1)
+	a.stats.Add(PollerProvisioning, "vms_requested", int64(vmCount))
 	return nil
 }

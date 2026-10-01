@@ -19,6 +19,8 @@ func (a *Monitor) runJobSummaryPoll(ctx context.Context) error {
 	for _, summary := range summaries {
 		if err := a.updateJobSummary(ctx, summary); err != nil {
 			log.Printf("job summary poll: job %s: %v", summary.JobID, err)
+		} else {
+			a.stats.Add(PollerJobSummary, "jobs_recomputed", 1)
 		}
 	}
 	return nil

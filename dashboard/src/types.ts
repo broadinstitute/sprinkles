@@ -176,6 +176,36 @@ export interface WorkPoolListEntry {
   expiry: string;
 }
 
+// GET /api/v1/monitor/status: what the monitor's background pollers have been
+// doing since the monitor process started (in-memory; resets on restart).
+export interface MonitorPollerStatus {
+  name: string;
+  /** Longest the poller should go between runs. */
+  max_interval_seconds: number;
+  runs: number;
+  /** Runs started early by an event, vs. by the fallback timer. */
+  notification_runs: number;
+  timer_runs: number;
+  failures: number;
+  consecutive_failures: number;
+  last_started: string | null;
+  last_finished: string | null;
+  last_success: string | null;
+  last_duration_ms: number;
+  last_error: string;
+  last_error_at: string | null;
+  /** Cumulative work counters since the monitor started. */
+  counters: Record<string, number>;
+}
+
+export interface MonitorStatus {
+  /** False when no monitor runs in the backend process (standalone
+   * dashboard-backend), in which case the rest is empty. */
+  available: boolean;
+  started_at: string | null;
+  pollers: MonitorPollerStatus[];
+}
+
 export interface WorkPoolSummaryHistoryEntry {
   workpool_id: string;
   timestamp: string;

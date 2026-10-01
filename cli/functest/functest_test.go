@@ -204,7 +204,7 @@ func TestCancelJobViaAPI(t *testing.T) {
 	}
 	apiKey := writeAPIKey(t, ctx, fsClient, "test-user")
 
-	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil)
+	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil, nil)
 	if err != nil {
 		t.Fatalf("NewDashboardHandler: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestCancelJob_NotFound(t *testing.T) {
 	}
 	apiKey := writeAPIKey(t, ctx, fsClient, "test-user")
 
-	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil)
+	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil, nil)
 	if err != nil {
 		t.Fatalf("NewDashboardHandler: %v", err)
 	}
@@ -302,7 +302,7 @@ func newWorkpoolAPIServer(t *testing.T, ctx context.Context) (*httptest.Server, 
 	}
 	apiKey := writeAPIKey(t, ctx, fsClient, "test-user")
 
-	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil)
+	handler, err := dev.NewDashboardHandler(ctx, testProject, fsClient, psClient, "", nil, nil)
 	if err != nil {
 		t.Fatalf("NewDashboardHandler: %v", err)
 	}

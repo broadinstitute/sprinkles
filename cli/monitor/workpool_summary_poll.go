@@ -173,6 +173,7 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		if err := a.saveState(ctx, state, message); err != nil {
 			return err
 		}
+		a.stats.Add(PollerWorkPoolSummary, "state_transitions", 1)
 	}
 
 	batchCounts := taskCountsFromMap(batchStateCounts)
@@ -218,7 +219,11 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		NonpreemptibleWorkers:         nonpreemptibleWorkers,
 		Tasks:                         tasks,
 	}
-	return a.workPoolSummaries.SaveHistory(ctx, history)
+	if err := a.workPoolSummaries.SaveHistory(ctx, history); err != nil {
+		return err
+	}
+	a.stats.Add(PollerWorkPoolSummary, "pools_recomputed", 1)
+	return nil
 }
 
 // RunWorkPoolSummaryPoll runs one workpool-summary pass. Exported for functional tests.

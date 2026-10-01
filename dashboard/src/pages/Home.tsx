@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import MonitorPanel from "../components/MonitorPanel";
 import { useEvents } from "../data/EventProvider";
 import { useVersion } from "../data/useVersion";
 import { apiFetch } from "../api/client";
 import type { WorkPoolListEntry } from "../types";
 
 const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
-const UNHEALTHY_POOL_STATES = new Set(["halted", "unhealthy"]);
-const POLL_INTERVAL_MS = 10_000;
+const POLL_INTERVAL_MS = 30_000;
 
 function useWorkPools(): WorkPoolListEntry[] | undefined {
   const [workpools, setWorkpools] = useState<WorkPoolListEntry[]>();
@@ -45,8 +45,6 @@ export default function Home() {
     [jobs],
   );
   const activePools = workpools?.filter((p) => p.state !== "idle").length;
-  const unhealthyPools =
-    workpools?.filter((p) => UNHEALTHY_POOL_STATES.has(p.state)).length ?? 0;
 
   return (
     <>
@@ -56,20 +54,6 @@ export default function Home() {
           <img src="favicon.svg" alt="" className="home-logo" />
           <span className="home-title">Sprinkles</span>
           {version && <span className="home-version">{version}</span>}
-          {workpools && (
-            <span className="home-status">
-              <span
-                className={`home-status-dot${
-                  unhealthyPools > 0 ? " home-status-dot-bad" : ""
-                }`}
-              />
-              {unhealthyPools > 0
-                ? `${unhealthyPools} work pool${
-                    unhealthyPools !== 1 ? "s" : ""
-                  } need${unhealthyPools === 1 ? "s" : ""} attention`
-                : "All systems operational"}
-            </span>
-          )}
         </div>
 
         <div className="home-cards">
@@ -117,6 +101,8 @@ export default function Home() {
             </p>
           </div>
         </div>
+
+        <MonitorPanel />
       </div>
     </>
   );
@@ -167,25 +153,6 @@ const styles = `
     border-radius: 3px;
     padding: 3px 7px;
   }
-
-  .home-status {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font: 400 12px 'Open Sans', sans-serif;
-    color: var(--bcl-gray);
-  }
-
-  .home-status-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--bcl-green);
-    display: inline-block;
-  }
-
-  .home-status-dot-bad { background: var(--bcl-negative); }
 
   .home-cards {
     display: grid;

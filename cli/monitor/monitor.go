@@ -96,11 +96,28 @@ type Monitor struct {
 	lingerDuration         time.Duration
 	lastActivity           time.Time
 	errorLog               *ErrorLog
+	stats                  *PollerStats
+	// trigger records how the poller callback currently being run was
+	// started (TriggerNotification or TriggerTimer). Only touched from
+	// RunMonitorLoop's goroutine, which runs callbacks one at a time.
+	trigger string
 }
 
 // ErrorLog returns the monitor's in-memory log of recent background-poller
 // errors (see RunMonitorLoop).
 func (a *Monitor) ErrorLog() *ErrorLog { return a.errorLog }
+
+// PollerStats returns the monitor's in-memory record of what each background
+// poller has been doing (see RunMonitorLoop).
+func (a *Monitor) PollerStats() *PollerStats { return a.stats }
+
+// runPoller runs one pass of the named poller, recording it in the poller
+// stats and the error log if it fails.
+func (a *Monitor) runPoller(name string, fn func() error) {
+	if err := a.stats.Run(name, a.trigger, fn); err != nil {
+		a.errorLog.Add("%s: %v", name, err)
+	}
+}
 
 // SetVerbose enables or disables verbose poll logging.
 func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
@@ -179,6 +196,8 @@ func New(
 		pubsub:   pubsub,
 		dbName:   dbName,
 		errorLog: NewErrorLog(DefaultErrorLogCapacity),
+		stats:    NewPollerStats(clock),
+		trigger:  TriggerTimer,
 	}
 }
 
@@ -188,6 +207,19 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	var lastActivityPrinted time.Time
 
 	sched := scheduler.New(a.clock)
+
+	// Register every poller up front so the dashboard lists all of them
+	// (with "never run" state) from startup, and knows how long each may
+	// legitimately go between runs.
+	for _, name := range []string{
+		PollerClusterReconciler, PollerProvisioning, PollerTaskRecovery,
+		PollerBatchStartup, PollerJobSummary, PollerWorkPoolSummary,
+	} {
+		a.stats.Register(name, defaultMaxTimeBetweenPolls)
+	}
+	if a.expiry != nil {
+		a.stats.Register(PollerExpiryCleaner, expiryCleanerInterval)
+	}
 
 	if a.lingerDuration > 0 {
 		var cancel context.CancelFunc
@@ -211,36 +243,28 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	// falls back to max_time_between_polls if no notification arrives.
 	notifyClusterReconciler := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Reconciling our records against google's")
-		if err := a.runClusterReconciler(ctx); err != nil {
-			a.errorLog.Add("cluster reconciler: %v", err)
-		}
+		a.runPoller(PollerClusterReconciler, func() error { return a.runClusterReconciler(ctx) })
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
 
 	// Provisioner: Responsible for requesting VMs for pending tasks. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for workpools which need new workers")
-		if err := a.runProvisioningPoll(ctx); err != nil {
-			a.errorLog.Add("provisioning poll: %v", err)
-		}
+		a.runPoller(PollerProvisioning, func() error { return a.runProvisioningPoll(ctx) })
 		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
 
 	// Task recovery: Fixed 30-second interval; no notification trigger.
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for ophaned jobs")
-		if err := a.runRequeueOrphanedTasks(ctx); err != nil {
-			a.errorLog.Add("task recovery: %v", err)
-		}
+		a.runPoller(PollerTaskRecovery, func() error { return a.runRequeueOrphanedTasks(ctx) })
 		a.vlogf("Completed: Checking for ophaned jobs")
 	})
 
 	// Batch startup monitor: Triggered by PubSub notifications for pending batches; and fallback timer
 	notifyBatchStartupMonitor := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking to see if workers successfully starting")
-		if err := a.runBatchStartupMonitor(ctx); err != nil {
-			a.errorLog.Add("batch startup monitor: %v", err)
-		}
+		a.runPoller(PollerBatchStartup, func() error { return a.runBatchStartupMonitor(ctx) })
 		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
 
@@ -248,9 +272,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	if a.expiry != nil {
 		sched.Add(expiryCleanerInterval, expiryCleanerInterval, func() {
 			a.vlogf("Deleting expired objects from firestore...")
-			if err := a.runExpiryCleaner(ctx); err != nil {
-				a.errorLog.Add("expiry cleaner: %v", err)
-			}
+			a.runPoller(PollerExpiryCleaner, func() error { return a.runExpiryCleaner(ctx) })
 			a.vlogf("Deleting expired objects from firestore complete")
 		})
 	}
@@ -260,9 +282,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	var notifyJobSummary func()
 	notifyJobSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Computing job summaries")
-		if err := a.runJobSummaryPoll(ctx); err != nil {
-			a.errorLog.Add("job summary poll: %v", err)
-		}
+		a.runPoller(PollerJobSummary, func() error { return a.runJobSummaryPoll(ctx) })
 		a.vlogf("Completed: Computing job summaries")
 	})
 
@@ -271,9 +291,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	var notifyWorkPoolSummary func()
 	notifyWorkPoolSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Compute workpool summaries")
-		if err := a.runWorkPoolSummaryPoll(ctx); err != nil {
-			a.errorLog.Add("workpool summary poll: %v", err)
-		}
+		a.runPoller(PollerWorkPoolSummary, func() error { return a.runWorkPoolSummaryPoll(ctx) })
 		a.vlogf("Completed: Compute workpool summaries")
 	})
 
@@ -347,7 +365,9 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		case <-fatalErrCh:
 			return
 		case cb := <-sched.NotifyChannel():
+			a.trigger = TriggerNotification
 			cb()
+			a.trigger = TriggerTimer
 		case <-timerCh:
 			runDue()
 		}

@@ -50,6 +50,7 @@ func (a *Monitor) runExpiryCleaner(ctx context.Context) error {
 		log.Printf("expiry cleaner: %s: %v", coll, err)
 	}
 	for coll, n := range deleted {
+		a.stats.Add(PollerExpiryCleaner, "documents_deleted", int64(n))
 		if n > 0 {
 			a.vlogf("expiry cleaner: deleted %d expired documents from %s", n, coll)
 		}
@@ -81,6 +82,7 @@ func (a *Monitor) cleanIdleWorkPoolSummaries(ctx context.Context) error {
 			log.Printf("expiry cleaner: delete idle workpool summary %s: %v", s.WorkpoolID, err)
 			continue
 		}
+		a.stats.Add(PollerExpiryCleaner, "idle_summaries_deleted", 1)
 		a.vlogf("expiry cleaner: deleted idle workpool summary %s (last updated %s)", s.WorkpoolID, s.LastUpdated.Format(time.RFC3339))
 	}
 	return nil

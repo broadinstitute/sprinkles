@@ -24,6 +24,8 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 		// incident.
 		if err := a.workers.MarkZombie(ctx, w.WorkerID); err != nil {
 			log.Printf("task recovery: mark worker %s zombie: %v", w.WorkerID, err)
+		} else {
+			a.stats.Add(PollerTaskRecovery, "workers_marked_zombie", 1)
 		}
 		if a.workerEvents != nil {
 			if err := a.workerEvents.PublishWorkerStopped(ctx, w.WorkerID, w.WorkpoolID, false); err != nil {
@@ -42,6 +44,8 @@ func (a *Monitor) runRequeueOrphanedTasks(ctx context.Context) error {
 		for _, t := range tasks {
 			if err := a.tasks.ResetToPending(ctx, t.TaskID, t.JobID, t.Status); err != nil {
 				log.Printf("task recovery: reset task %s to pending: %v", t.TaskID, err)
+			} else {
+				a.stats.Add(PollerTaskRecovery, "tasks_requeued", 1)
 			}
 		}
 	}
