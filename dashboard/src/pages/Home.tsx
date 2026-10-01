@@ -91,13 +91,30 @@ export default function Home() {
         <div className="home-callouts">
           <div className="home-callout">
             <strong>What&apos;s a job?</strong>
-            User-submitted work made up of one or more tasks. Every job has a
-            workpool associated with it.
+            <p>
+              User-submitted work made up of one or more tasks. Every job has a
+              workpool associated with it.
+            </p>
+            <p>
+              Each task runs a command in a Docker container on one of the
+              workpool&apos;s workers, with its input files downloaded from GCS
+              beforehand and its results and logs uploaded afterward. A job can
+              be killed while running, and its record is kept for 7 days.
+            </p>
           </div>
           <div className="home-callout">
-            <strong>What&apos;s a workpool?</strong>A dynamically provisioned
-            collection of identically configured instances. Executes tasks as
-            its capacity allows.
+            <strong>What&apos;s a workpool?</strong>
+            <p>
+              A dynamically provisioned collection of identically configured
+              instances. Executes tasks as its capacity allows.
+            </p>
+            <p>
+              Each workpool fixes a machine type, region, optional GPUs and a
+              cap on concurrent workers. Workers are added as tasks queue up,
+              preferring cheaper preemptible VMs, and shut down after lingering
+              idle. If batches of workers keep failing, the workpool halts until
+              a new job is submitted to it.
+            </p>
           </div>
         </div>
       </div>
@@ -230,6 +247,16 @@ const styles = `
     border-radius: 4px;
     padding: 16px;
     font: 400 16px 'Open Sans', sans-serif;
+  }
+
+  .home-callout p {
+    margin: 0;
+  }
+
+  .home-callout p + p {
+    margin-top: 8px;
+    font-size: 14px;
+    color: var(--bcl-gray);
   }
 
   .home-callout strong {
