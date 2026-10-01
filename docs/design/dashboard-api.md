@@ -96,6 +96,8 @@ Get a single workpool's configuration and current status.
       "mount_options": ["string"]
     }
   ],
+  "accelerators": [{ "type": "string", "count": "integer" }],
+  "provision_mode": "string: spot|normal|flex",
   "labels": [{ "name": "string", "value": "string" }],
   "max_worker_count": "integer",
   "max_preemptible_worker_attempts": "integer",

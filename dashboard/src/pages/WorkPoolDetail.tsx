@@ -800,6 +800,7 @@ function WorkPoolPropertiesPanel({
         value={detail.zones?.length ? detail.zones.join(", ") : dash}
       />
       <DetailRow label="root dir" value={detail.root_dir || dash} />
+      <DetailRow label="provision mode" value={detail.provision_mode || dash} />
 
       <ProvisioningSection
         workpoolId={workpoolId}
@@ -825,6 +826,15 @@ function WorkPoolPropertiesPanel({
               label={v.mount_point}
               value={`${v.type} · ${v.size_in_gb} GB`}
             />
+          ))}
+        </>
+      )}
+
+      {detail.accelerators?.length > 0 && (
+        <>
+          <SectionHeader>GPU</SectionHeader>
+          {detail.accelerators.map((a, i) => (
+            <DetailRow key={i} label={a.type} value={`× ${a.count}`} />
           ))}
         </>
       )}

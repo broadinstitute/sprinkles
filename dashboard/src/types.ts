@@ -147,6 +147,8 @@ export interface WorkPoolDetail {
   sprinkles_worker_gcs_path: string;
   resources: { name: string; value: number }[];
   empty_volumes: { mount_point: string; type: string; size_in_gb: number }[];
+  accelerators: { type: string; count: number }[];
+  provision_mode: string;
   labels: { name: string; value: string }[];
   max_worker_count: number;
   max_preemptible_worker_attempts: number;

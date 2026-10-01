@@ -231,6 +231,8 @@ type workpoolDetailResponse struct {
 	Resources                    []sprinkles.ResourceEntry `json:"resources"`
 	EmptyVolumes                 []sprinkles.EmptyVolume   `json:"empty_volumes"`
 	GCSMounts                    []sprinkles.GCSMount      `json:"gcs_mounts"`
+	Accelerators                 []sprinkles.Accelerator   `json:"accelerators"`
+	ProvisionMode                string                    `json:"provision_mode"`
 	Labels                       []labelResponse           `json:"labels"`
 	MaxWorkerCount               int                       `json:"max_worker_count"`
 	MaxPreemptibleWorkerAttempts int                       `json:"max_preemptible_worker_attempts"`
@@ -285,6 +287,8 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 		Resources:                    wp.Resources,
 		EmptyVolumes:                 wp.EmptyVolumes,
 		GCSMounts:                    wp.GCSMounts,
+		Accelerators:                 wp.Accelerators,
+		ProvisionMode:                wp.ProvisionMode,
 		Labels:                       detailLabels,
 		MaxWorkerCount:               wp.MaxWorkerCount,
 		MaxPreemptibleWorkerAttempts: wp.MaxPreemptibleWorkerAttempts,
