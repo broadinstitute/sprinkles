@@ -6,6 +6,14 @@ cd "$ROOT/cli"
 
 PROJECT="${PROJECT:-sparkles-v100}"
 
+NODE_MODULES="${ROOT}/dashboard/node_modules"
+if [ ! -d "${NODE_MODULES}" ] \
+  || [ "${ROOT}/dashboard/package.json" -nt "${NODE_MODULES}" ] \
+  || [ "${ROOT}/dashboard/package-lock.json" -nt "${NODE_MODULES}" ]; then
+  echo "Installing frontend dependencies..."
+  ( cd "${ROOT}/dashboard" && npm ci )
+fi
+
 echo "Building sprinkles..."
 mkdir -p ./bin
 go build -o ./bin/sprinkles ./cmd/sprinkles

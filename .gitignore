@@ -64,3 +64,5 @@ v100/dev/webui/.frontend-build-marker
 # path) -- these are live GCP credentials and must never be committed.
 v100/sparkles-sa-key.json
 *-sa-key.json
+!cli/dev/webui/dist
+!cli/dev/webui/dist/index.html
