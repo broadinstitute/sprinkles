@@ -143,6 +143,12 @@ export default function MonitorPanel() {
                 <th className="mon-th mon-th-when">Last run</th>
                 <th className="mon-th mon-th-num">Duration</th>
                 <th className="mon-th mon-th-runs">Runs</th>
+                <th
+                  className="mon-th mon-th-num"
+                  title="Runs started early by an event (a job or batch notification)"
+                >
+                  Wake-ups
+                </th>
                 <th className="mon-th">Work done</th>
               </tr>
             </thead>
@@ -174,14 +180,14 @@ export default function MonitorPanel() {
                   <td className="mon-td mon-num mon-muted">
                     {p.runs > 0 ? formatDuration(p.last_duration_ms) : "—"}
                   </td>
-                  <td
-                    className="mon-td mon-muted"
-                    title={`${p.notification_runs} started by an event, ${p.timer_runs} by the fallback timer`}
-                  >
+                  <td className="mon-td mon-num mon-muted">
                     {p.runs}
                     {p.failures > 0 && (
                       <span className="mon-bad"> ({p.failures} failed)</span>
                     )}
+                  </td>
+                  <td className="mon-td mon-num mon-muted">
+                    {p.notification_runs}
                   </td>
                   <td className="mon-td">
                     {Object.entries(p.counters)
@@ -268,10 +274,18 @@ const styles = `
     border-bottom: 1px solid var(--bcl-border);
   }
 
-  .mon-th-status { width: 6.5rem; }
-  .mon-th-when   { width: 6rem; }
-  .mon-th-num    { width: 5rem; text-align: right; }
-  .mon-th-runs   { width: 8rem; }
+  .mon-th-num,
+  .mon-th-runs { text-align: right; }
+
+  /* Every column but the last shrinks to fit its content (width: 1% plus
+     nowrap makes an auto-layout column as narrow as it can be); the last
+     column ("Work done") takes whatever width is left. */
+  .mon-table th:not(:last-child),
+  .mon-table td:not(:last-child) {
+    width: 1%;
+    white-space: nowrap;
+    padding-right: 20px;
+  }
 
   .mon-td {
     padding: 8px;
