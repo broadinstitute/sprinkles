@@ -351,11 +351,11 @@ export default function NavBar() {
                 {i > 0 && (
                   <span style={{ color: "#ccc", flexShrink: 0 }}>›</span>
                 )}
-                {seg.href && !isLast ? (
+                {seg.href && (!isLast || i === 0) ? (
                   <Link
                     to={seg.href}
                     style={{
-                      color: i === 0 ? "#1565c0" : "#1565c0",
+                      color: isLast ? "#222" : "#1565c0",
                       textDecoration: "none",
                       fontWeight: i === 0 ? 700 : 400,
                       overflow: "hidden",

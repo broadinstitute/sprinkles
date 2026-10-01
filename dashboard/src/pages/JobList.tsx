@@ -875,6 +875,7 @@ export default function JobList() {
           {/* ── Main content ── */}
           <div className="jl-main">
             <h1 className="jl-page-title">
+              <img src="favicon.svg" alt="" className="jl-page-logo" />
               sprinkles
               {version && <span className="jl-page-version">{version}</span>}
               <Link to="/errors" className="jl-error-log-link">
@@ -1033,6 +1034,14 @@ const styles = `
     color: #111;
     margin: 0 0 1.5rem 0;
     letter-spacing: -0.03em;
+    display: flex;
+    align-items: center;
+  }
+
+  .jl-page-logo {
+    height: 1em;
+    width: 1em;
+    margin-right: 0.5rem;
   }
 
   .jl-page-version {
