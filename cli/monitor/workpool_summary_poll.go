@@ -116,7 +116,7 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 	// idle when no non-terminal workers or tasks remain.
 	nonTerminal := 0
 	for _, w := range workers {
-		if w.Status != "stopped" {
+		if w.Status != "stopped" && w.Status != "zombie" {
 			nonTerminal++
 		}
 	}

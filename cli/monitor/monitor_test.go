@@ -58,6 +58,20 @@ func TestSummaryPoll_JobCreated_OKUnchanged(t *testing.T) {
 	assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
 }
 
+// A zombie worker (heartbeat expired without a clean shutdown) is as
+// terminal as a stopped one: it must not keep a drained pool from going idle.
+func TestSummaryPoll_ZombieWorkerDoesNotBlockIdle(t *testing.T) {
+	w := newWorld()
+	w.Pools.Add(defaultPool("pool-1"))
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "zombie"})
+	w.Workers.Add(&Worker{WorkerID: "w2", WorkpoolID: "pool-1", Status: "stopped"})
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(context.Background()))
+
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
+}
+
 func TestSummaryPoll_EventCursorAdvances(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
