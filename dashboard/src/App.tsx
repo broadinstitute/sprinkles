@@ -4,7 +4,9 @@ import { EventProvider } from "./data/EventProvider";
 import NavBar from "./components/NavBar";
 import TaskDetail from "./pages/TaskDetail";
 import JobDetail from "./pages/JobDetail";
+import Home from "./pages/Home";
 import JobList from "./pages/JobList";
+import WorkPoolList from "./pages/WorkPoolList";
 import ClusterDetail from "./pages/ClusterDetail";
 import ClusterLogs from "./pages/ClusterLogs";
 import WorkPoolDetail from "./pages/WorkPoolDetail";
@@ -20,7 +22,8 @@ function AppRoutes() {
       <NavBar />
       <div style={{ paddingTop: 40 }}>
         <Routes>
-          <Route path="/" element={<JobList />} />
+          <Route path="/" element={<Home />} />
+          <Route path="/jobs" element={<JobList />} />
           <Route path="/jobs/:jobId" element={<JobDetail />} />
           <Route path="/jobs/:jobId/tasks" element={<JobDetail />} />
           <Route path="/jobs/:jobId/tasks/:taskId" element={<TaskDetail />} />
@@ -34,6 +37,7 @@ function AppRoutes() {
           />
           <Route path="/jobs/:jobId/summary" element={<JobDetail />} />
           <Route path="/jobs/:jobId/events" element={<JobDetail />} />
+          <Route path="/workpools" element={<WorkPoolList />} />
           <Route path="/workpools/:workpoolId" element={<WorkPoolDetail />} />
           <Route
             path="/workpools/:workpoolId/workers"

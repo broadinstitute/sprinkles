@@ -8,7 +8,6 @@ import JobsTable, {
 } from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
 import { apiFetch } from "../api/client";
-import { useVersion } from "../data/useVersion";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -713,7 +712,6 @@ export default function JobList() {
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
   const [showHidden, setShowHidden] = useState(false);
-  const version = useVersion();
 
   const toggleHidden = useCallback(
     (jobId: string, currentlyHidden: boolean) => {
@@ -874,15 +872,6 @@ export default function JobList() {
         <div className="jl-layout">
           {/* ── Main content ── */}
           <div className="jl-main">
-            <h1 className="jl-page-title">
-              <img src="favicon.svg" alt="" className="jl-page-logo" />
-              sprinkles
-              {version && <span className="jl-page-version">{version}</span>}
-              <Link to="/errors" className="jl-error-log-link">
-                Error Log
-              </Link>
-            </h1>
-
             {/* Filter bar */}
             <div className="jl-filter-bar">
               <div className="jl-filter-search">
@@ -1026,45 +1015,6 @@ const styles = `
     width: 300px;
     flex-shrink: 0;
     padding-top: 4.5rem; /* align below page title */
-  }
-
-  .jl-page-title {
-    font-size: 2rem;
-    font-weight: 700;
-    color: #111;
-    margin: 0 0 1.5rem 0;
-    letter-spacing: -0.03em;
-    display: flex;
-    align-items: center;
-  }
-
-  .jl-page-logo {
-    height: 1em;
-    width: 1em;
-    margin-right: 0.5rem;
-  }
-
-  .jl-page-version {
-    font-size: 0.85rem;
-    font-weight: 400;
-    color: #bbb;
-    letter-spacing: normal;
-    margin-left: 0.6rem;
-    vertical-align: middle;
-  }
-
-  .jl-error-log-link {
-    font-size: 0.8rem;
-    font-weight: 400;
-    color: #1565c0;
-    letter-spacing: normal;
-    margin-left: 1rem;
-    vertical-align: middle;
-    text-decoration: none;
-  }
-
-  .jl-error-log-link:hover {
-    text-decoration: underline;
   }
 
   /* ── Filter bar ─────────────────────────────────── */

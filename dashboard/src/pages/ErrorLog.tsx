@@ -156,7 +156,7 @@ export default function ErrorLog() {
 
       <div style={{ marginTop: "1.5rem" }}>
         <Link
-          to="/"
+          to="/jobs"
           style={{
             color: "#1565c0",
             textDecoration: "none",

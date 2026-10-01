@@ -162,6 +162,20 @@ export interface WorkPoolDetail {
   expiry: string;
 }
 
+// One row of GET /api/v1/workpools: the subset of WorkPoolDetail the list
+// view needs.
+export interface WorkPoolListEntry {
+  workpool_id: string;
+  machine_type: string;
+  region: string;
+  state: string;
+  state_message: string;
+  last_incident_at: string | null;
+  incident_count: number;
+  labels: { name: string; value: string }[];
+  expiry: string;
+}
+
 export interface WorkPoolSummaryHistoryEntry {
   workpool_id: string;
   timestamp: string;

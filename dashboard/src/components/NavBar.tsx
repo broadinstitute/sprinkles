@@ -15,7 +15,10 @@ function parseBreadcrumbs(
   const segs = pathname.split("/").filter(Boolean);
   const items: BreadcrumbSegment[] = [{ label: "sprinkles", href: "/" }];
 
-  if (segs[0] === "jobs" && segs[1]) {
+  if (segs[0] === "jobs" && !segs[1]) {
+    items.push({ label: "jobs" });
+  } else if (segs[0] === "jobs" && segs[1]) {
+    items.push({ label: "jobs", href: "/jobs" });
     const jobId = segs[1];
     const jobLabel = jobNames[jobId] || jobId;
     if (segs[2] === "tasks" && segs[3]) {
@@ -43,7 +46,10 @@ function parseBreadcrumbs(
     } else {
       items.push({ label: jobLabel });
     }
+  } else if (segs[0] === "workpools" && !segs[1]) {
+    items.push({ label: "workpools" });
   } else if (segs[0] === "workpools" && segs[1]) {
+    items.push({ label: "workpools", href: "/workpools" });
     const workpoolId = segs[1];
     if (segs[2] === "workers" && segs[3]) {
       items.push({ label: workpoolId, href: `/workpools/${workpoolId}` });

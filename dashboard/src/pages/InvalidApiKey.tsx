@@ -11,7 +11,7 @@ export default function InvalidApiKey() {
     const trimmed = key.trim();
     if (!trimmed) return;
     setApiKey(trimmed);
-    navigate("/");
+    navigate("/jobs");
   }
 
   return (
