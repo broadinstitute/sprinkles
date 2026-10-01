@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT/cli"
 
 PROJECT="${PROJECT:-sparkles-v100}"
 
@@ -23,7 +24,7 @@ procs:
     cmd: ["${SPRINKLES}", "serve", "--project", "${PROJECT}", "--verbose"]
     log: "monitor.log"
   frontend:
-    cmd: ["bash", "-c", "cd ../dashboard && npm run dev"]
+    cmd: ["bash", "-c", "cd ${ROOT}/dashboard && npm run dev"]
   shell:
     cmd: ["bash"]
     stop: "SIGKILL"

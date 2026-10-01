@@ -49,7 +49,7 @@ publishing it to the GCS path worker VMs bootstrap from.
 `./start-dashboard-emu.sh` builds the binary and brings up the
 dashboard-backend, dashboard dev server, and a synthetic load generator
 against local Firestore/Pub-Sub emulators — no GCP project or credentials
-required. `cli/start.sh` is the equivalent for a real GCP project: it runs
+required. `start.sh` is the equivalent for a real GCP project: it runs
 `sprinkles serve` plus the frontend dev server (reads
 `cli/sample-config.json`, requires `gcloud` auth).
 
