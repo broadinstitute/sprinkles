@@ -50,19 +50,19 @@ dashboard-backend/sparklespray-dashboard-backend
 simulator/sparklespray-simulator
 fake-home/
 
-# Frontend build output embedded into the sparkles binary via go:embed
-# (v100/dev/webui). Real build output (from v100/build.sh) is never
+# Frontend build output embedded into the sprinkles binary via go:embed
+# (cli/dev/webui). Real build output (from cli/build.sh) is never
 # committed; only a placeholder index.html is tracked so `go build` succeeds
-# on a fresh checkout without Node/npm installed.
-!v100/dev/webui/dist/
-v100/dev/webui/dist/*
-!v100/dev/webui/dist/index.html
+# (and `sprinkles serve` starts) on a fresh checkout without Node/npm.
+# The repo-wide `dist` rule above ignores the directory itself, so it has to
+# be un-ignored before its contents can be.
+!cli/dev/webui/dist/
+cli/dev/webui/dist/*
+!cli/dev/webui/dist/index.html
 # build.sh's breadcrumb for skipping an unchanged frontend rebuild.
-v100/dev/webui/.frontend-build-marker
+cli/dev/webui/.frontend-build-marker
 
 # Service account keys minted by v100/setup-gcp-project.sh (default output
 # path) -- these are live GCP credentials and must never be committed.
 v100/sparkles-sa-key.json
 *-sa-key.json
-!cli/dev/webui/dist
-!cli/dev/webui/dist/index.html
