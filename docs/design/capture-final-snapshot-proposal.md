@@ -186,13 +186,13 @@ deploy). `build.sh` already has a directly analogous pattern for exactly this
 problem: it builds the dashboard frontend first, copies the output into
 `cli/dev/webui/dist/`, and `cli/dev/webui/webui.go` embeds it with
 `//go:embed all:dist` so the `sprinkles` binary is self-contained
-(`cli/build.sh:44-59`, `cli/dev/webui/webui.go:15-16`).
+(`build.sh:44-59`, `cli/dev/webui/webui.go:15-16`).
 
 Do the same for `sprinkles-init`:
 
 1. `build.sh` builds `cli/cmd/sprinkles-init` as its own static binary first
    (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64`, same flags already used for
-   `sprinkles` itself at `cli/build.sh:68-72` — static is required here
+   `sprinkles` itself at `build.sh:68-72` — static is required here
    regardless, since this binary gets bind-mounted into arbitrary task images
    with unknown/no libc).
 2. Copy the resulting binary into a new embed directory, e.g.

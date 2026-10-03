@@ -26,7 +26,7 @@ deployments should use `serve`.
   host (e.g. a GCE instance), i.e. standard Application Default Credentials.
   There is no sprinkles-specific credentials flag or env var.
 - The one-time cluster setup already done for the target project. For a brand
-  new project, `cli/setup-control-project.sh --project <project>` (run once with
+  new project, `setup-control-project.sh --project <project>` (run once with
   broad/admin access) enables every required API, creates a service account,
   grants it every IAM role the rest of setup and the running app need, and
   mints a key for it; then `sprinkles dev bootstrap-project --project <project> --region <region> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account; zones are looked up automatically for `--region`) creates the
@@ -56,7 +56,7 @@ From a machine with Node/npm and Go installed (it does not need to be the
 target server):
 
 ```
-./cli/build.sh [version]
+./build.sh [version]
 ```
 
 This builds the frontend (`npm ci && npm run build` in `dashboard/` —
@@ -70,7 +70,7 @@ cli/bin/sprinkles-linux-amd64-<version>
 
 `version` defaults to `git describe --tags --always --dirty` if omitted. This
 is the same binary used to bootstrap worker VMs (see
-`cli/upload-worker-binary.sh`) — there's no separate "server" build; the
+`upload-worker-binary.sh`) — there's no separate "server" build; the
 frontend build is cheap enough that a worker VM downloading it costs nothing
 extra at boot.
 
@@ -126,7 +126,7 @@ Only the workload moves. The control plane stays put:
   subscribes to.
 
 The backend validates only the _format_ of `projectID`; everything else is IAM.
-Run `cli/setup-target-project.sh --sprinkles-project <C> --target-project <W>`
+Run `setup-target-project.sh --sprinkles-project <C> --target-project <W>`
 to apply all of the grants below. It creates a worker service account in `W`
 (`sprinkles-worker@<W>.iam.gserviceaccount.com`); submit the workpool with
 `workpool.serviceAccount` set to it. Running workers as a `W`-local SA avoids

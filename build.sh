@@ -11,7 +11,7 @@
 #   version   defaults to `git describe --tags --always --dirty`.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DASHBOARD_DIR="${REPO_ROOT}/dashboard"
 EMBED_DIST="${REPO_ROOT}/cli/dev/webui/dist"
 # Not inside EMBED_DIST: that directory gets wiped and recreated on every

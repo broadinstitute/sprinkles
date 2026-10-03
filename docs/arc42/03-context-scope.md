@@ -46,7 +46,7 @@ dependencies, and can be run apart via `sprinkles dev monitor` /
 Scope of this documentation: the `cli/` Go module. The `dashboard/`
 frontend's _source_ (a separate Node/npm project) is out of scope as a
 codebase, but its _build output_ is embedded into the `sprinkles` binary at
-build time (`cli/build.sh` → `cli/dev/webui`) and served by
+build time (`build.sh` → `cli/dev/webui`) and served by
 `dashboard-backend`, so at runtime there is no separate frontend
 deployment to treat as an external system. `cli/` is the only active
 implementation in the repository — the Python CLI it replaced has been

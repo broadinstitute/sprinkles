@@ -17,7 +17,7 @@ implementation, which has been removed from the repo.
 | Path                      | What it is                                                                                                                                                                               |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`cli/`](cli)             | The Go implementation: CLI (`submit`/`kill`), `worker`, `serve` (monitor + dashboard-backend), and `dev` subcommands. See `cli/*.go`, `cli/dev/`, `cli/monitor/`.                        |
-| [`dashboard/`](dashboard) | The React/Vite dashboard frontend. Built and embedded into the `sprinkles` binary (see `cli/build.sh`); run standalone via `npm run dev` for local frontend development.                 |
+| [`dashboard/`](dashboard) | The React/Vite dashboard frontend. Built and embedded into the `sprinkles` binary (see `build.sh`); run standalone via `npm run dev` for local frontend development.                 |
 | [`docs/`](docs)           | All current documentation — architecture (arc42), design docs, and the remote-deployment guide. Start at [`docs/README.md`](docs/README.md).                                             |
 | [`examples/`](examples)   | Pre-v100 example job specs. Predate the Go rewrite and aren't verified against it — treat as inspiration, not working examples.                                                          |
 | `start-dashboard-emu.sh`  | Runs the stack locally against Firestore/Pub-Sub emulators (dashboard-backend, dashboard dev server, and a synthetic load generator in place of a real monitor) — no GCP project needed. |
@@ -25,7 +25,7 @@ implementation, which has been removed from the repo.
 ## Building
 
 ```
-./cli/build.sh
+./build.sh
 ```
 
 Produces one self-contained binary — `cli/bin/sprinkles-linux-amd64-<version>`
@@ -34,14 +34,14 @@ Produces one self-contained binary — `cli/bin/sprinkles-linux-amd64-<version>`
 bootstraps worker VMs and is deployed as the control plane; needs Node/npm in
 addition to Go, since it builds the frontend. `<version>` defaults to
 `git describe --tags --always --dirty`, or pass one explicitly:
-`./cli/build.sh v1.2.3`.
+`./build.sh v1.2.3`.
 
 For quick local iteration on Go code only (skips the frontend build, and
 serves a placeholder page instead of the real UI at `/`), plain
 `go build -o bin/sparkles ./cmd/sparkles` from `cli/` still works.
 
 See [docs/deploying-dashboard-backend.md](docs/deploying-dashboard-backend.md)
-for deploying the built binary, and `cli/upload-worker-binary.sh` for
+for deploying the built binary, and `upload-worker-binary.sh` for
 publishing it to the GCS path worker VMs bootstrap from.
 
 ## Running locally

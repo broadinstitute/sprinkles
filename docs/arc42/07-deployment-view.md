@@ -5,13 +5,13 @@
 There is **no Dockerfile anywhere in the repository** and no container
 image is built for worker or monitor. Instead:
 
-- `cli/build.sh [version]` cross-compiles a single static binary
+- `build.sh [version]` cross-compiles a single static binary
   (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/sprinkles`) to
   `cli/bin/sprinkles-linux-amd64-<version>`, version-stamped via `-ldflags`.
   `version` defaults to `git describe --tags --always --dirty` if not given.
   The same binary is used both to bootstrap worker VMs and to run the
   control plane (§7.4) — see §7.2 for what else this script does.
-- `cli/upload-worker-binary.sh [version] [gcs-path]` runs `build.sh` and
+- `upload-worker-binary.sh [version] [gcs-path]` runs `build.sh` and
   then `gcloud storage cp`s the result to the fixed GCS path worker VMs
   bootstrap from (`sprinklesWorkerGCSPath` in `SprinklesConfig`/workpool
   specs — see §7.3), e.g. `gs://sprinkles-test-0625/bin/sprinkles-linux-amd64-dev`.
@@ -30,7 +30,7 @@ maintaining a second, UI-less binary) keeps there being exactly one build
 script and one artifact to reason about — the frontend build is cheap enough
 that a worker VM downloading the extra bytes at boot costs nothing material.
 
-- `cli/build.sh` runs `npm ci && npm run build` in `dashboard/`, copies the
+- `build.sh` runs `npm ci && npm run build` in `dashboard/`, copies the
   resulting `dashboard/dist/*` into `cli/dev/webui/dist/`, then
   cross-compiles `./cmd/sprinkles`. It skips the frontend build (an mtime
   check against a `.frontend-build-marker` breadcrumb, not a content hash)
