@@ -6,6 +6,16 @@ cd "$ROOT/cli"
 
 PROJECT="${PROJECT:-sparkles-v100}"
 
+# Run as the project's sprinkles service account (the key written by
+# cli/setup-control-project.sh) rather than the developer's own gcloud identity:
+# only the service account is allowed to act as itself when creating Batch jobs.
+export GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-${ROOT}/cli/sprinkles-sa-key.json}"
+if [ ! -f "${GOOGLE_APPLICATION_CREDENTIALS}" ]; then
+  echo "Service account key not found at ${GOOGLE_APPLICATION_CREDENTIALS}" >&2
+  echo "Run cli/setup-control-project.sh, or set GOOGLE_APPLICATION_CREDENTIALS to the key." >&2
+  exit 1
+fi
+
 NODE_MODULES="${ROOT}/dashboard/node_modules"
 if [ ! -d "${NODE_MODULES}" ] \
   || [ "${ROOT}/dashboard/package.json" -nt "${NODE_MODULES}" ] \
