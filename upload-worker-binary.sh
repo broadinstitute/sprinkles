@@ -37,6 +37,6 @@ GCS_PATH=${2:-${DEFAULT_GCS_PATH}}
 
 "${REPO_ROOT}/build.sh" "${VERSION}"
 
-OUTPUT="${REPO_ROOT}/cli/bin/sprinkles-linux-amd64-${VERSION}"
+OUTPUT="${REPO_ROOT}/bin/sprinkles-linux-amd64-${VERSION}"
 echo "Uploading ${OUTPUT} to ${GCS_PATH}..."
 gcloud storage cp "${OUTPUT}" "${GCS_PATH}"

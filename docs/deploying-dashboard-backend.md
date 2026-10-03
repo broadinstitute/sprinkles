@@ -65,7 +65,7 @@ skipped if nothing under `dashboard/` has changed since the last build; pass
 embedded assets, and cross-compiles a single static binary at:
 
 ```
-cli/bin/sprinkles-linux-amd64-<version>
+bin/sprinkles-linux-amd64-<version>
 ```
 
 `version` defaults to `git describe --tags --always --dirty` if omitted. This
@@ -77,7 +77,7 @@ extra at boot.
 ## Copying the binary to the server
 
 ```
-gcloud compute scp cli/bin/sprinkles-linux-amd64-<version> \
+gcloud compute scp bin/sprinkles-linux-amd64-<version> \
   my-host:/opt/sprinkles/sprinkles-<version>
 ```
 

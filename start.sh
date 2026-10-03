@@ -25,13 +25,13 @@ if [ ! -d "${NODE_MODULES}" ] \
 fi
 
 echo "Building sprinkles..."
-mkdir -p ./bin
-go build -o ./bin/sprinkles ./cmd/sprinkles
+mkdir -p "${ROOT}/bin"
+go build -o "${ROOT}/bin/sprinkles" ./cmd/sprinkles
 
 echo "Loading config"
-./bin/sprinkles dev set-config sample-config.json --project "${PROJECT}"
+"${ROOT}/bin/sprinkles" dev set-config sample-config.json --project "${PROJECT}"
 
-SPRINKLES="$(pwd)/bin/sprinkles"
+SPRINKLES="${ROOT}/bin/sprinkles"
 
 cat > /tmp/mprocs-sprinkles.yaml <<EOF
 procs:

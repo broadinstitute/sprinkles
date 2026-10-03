@@ -25,7 +25,7 @@ if [ "${1:-}" = "--force" ]; then
 fi
 
 VERSION=${1:-$(git -C "${REPO_ROOT}" describe --tags --always --dirty)}
-OUTPUT="${REPO_ROOT}/cli/bin/sprinkles-linux-amd64-${VERSION}"
+OUTPUT="${REPO_ROOT}/bin/sprinkles-linux-amd64-${VERSION}"
 
 # Skip the frontend build if it's already embedded (EMBED_DIST/assets exists
 # -- Vite always emits one) and nothing under dashboard/, other than
@@ -64,6 +64,7 @@ else
   echo
 fi
 
+mkdir -p "$(dirname "${OUTPUT}")"
 echo "Building ${OUTPUT}..."
 ( cd "${REPO_ROOT}/cli" && \
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \

@@ -7,7 +7,7 @@ image is built for worker or monitor. Instead:
 
 - `build.sh [version]` cross-compiles a single static binary
   (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./cmd/sprinkles`) to
-  `cli/bin/sprinkles-linux-amd64-<version>`, version-stamped via `-ldflags`.
+  `bin/sprinkles-linux-amd64-<version>`, version-stamped via `-ldflags`.
   `version` defaults to `git describe --tags --always --dirty` if not given.
   The same binary is used both to bootstrap worker VMs and to run the
   control plane (§7.4) — see §7.2 for what else this script does.

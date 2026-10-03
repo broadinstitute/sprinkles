@@ -28,7 +28,7 @@ implementation, which has been removed from the repo.
 ./build.sh
 ```
 
-Produces one self-contained binary — `cli/bin/sprinkles-linux-amd64-<version>`
+Produces one self-contained binary — `bin/sprinkles-linux-amd64-<version>`
 — with `worker`, `submit`, `kill`, `serve`, and `dev ...` subcommands
 (`./bin/sparkles --help`), with the dashboard UI embedded. The same binary
 bootstraps worker VMs and is deployed as the control plane; needs Node/npm in
