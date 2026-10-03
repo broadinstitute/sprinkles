@@ -26,7 +26,7 @@ deployments should use `serve`.
   host (e.g. a GCE instance), i.e. standard Application Default Credentials.
   There is no sprinkles-specific credentials flag or env var.
 - The one-time cluster setup already done for the target project. For a brand
-  new project, `cli/setup-gcp-project.sh --project <project>` (run once with
+  new project, `cli/setup-control-project.sh --project <project>` (run once with
   broad/admin access) enables every required API, creates a service account,
   grants it every IAM role the rest of setup and the running app need, and
   mints a key for it; then `sprinkles dev bootstrap-project --project <project> --region <region> --bucket <bucket> --service-account <sa-email> --admin-user <you>` (run as that service account; zones are looked up automatically for `--region`) creates the
@@ -126,17 +126,22 @@ Only the workload moves. The control plane stays put:
   subscribes to.
 
 The backend validates only the _format_ of `projectID`; everything else is IAM.
-For a workload project `W` and control-plane project `C`, you need:
+Run `cli/setup-target-project.sh --sprinkles-project <C> --target-project <W>`
+to apply all of the grants below. It creates a worker service account in `W`
+(`sprinkles-worker@<W>.iam.gserviceaccount.com`); submit the workpool with
+`workpool.serviceAccount` set to it. Running workers as a `W`-local SA avoids
+the `iam.disableCrossProjectServiceAccountUsage` org policy, which can block
+attaching a service account from `C` to VMs in `W`.
+
+For a workload project `W` and control-plane project `C`, the grants are:
 
 | Grant                                                                                                                                                | Where                                    | Why                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Backend/monitor SA: `roles/batch.jobsEditor` (or equivalent `batch.jobs.create`/`get`/`cancel`), `compute.instances.list`/`delete`, and Logging read | project `W`                              | Create and reconcile Batch jobs and their VMs; fetch batch logs on failure                                         |
 | `W`'s Batch service agent (`service-<W-number>@gcp-sa-batch.iam.gserviceaccount.com`): `roles/pubsub.publisher`                                      | on `C`'s `batch-api-notifications` topic | Without it the monitor never receives Batch state changes and falls back to timer polling — slower, but not broken |
-| Worker VM SA (`workpool.serviceAccount`): Firestore, Pub/Sub, and GCS access                                                                         | project `C`                              | Workers claim tasks and stream results against the control plane                                                   |
-
-Note that attaching a service account belonging to `C` to VMs in `W` can be
-blocked by the `iam.disableCrossProjectServiceAccountUsage` org policy; the
-alternative is an SA in `W` granted the roles above on `C`.
+| Backend/monitor SA: `roles/iam.serviceAccountUser` | on the worker SA in `W` | "Act as" permission to create Batch jobs that run as it |
+| Worker SA in `W` (`workpool.serviceAccount`): Firestore, Pub/Sub, and GCS access | project `C` | Workers claim tasks and stream results against the control plane |
+| Worker SA in `W`: `roles/batch.agentReporter`, `roles/logging.logWriter`, GCS access | project `W` | Batch agent reporting, job logs, and writing to GCS in `W` |
 
 ## systemd unit example
 

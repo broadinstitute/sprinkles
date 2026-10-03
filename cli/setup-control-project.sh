@@ -8,7 +8,7 @@
 # `sprinkles dev bootstrap-project`, which does the rest: Firestore database +
 # indexes, GCS bucket, Pub/Sub topics, SprinklesConfig, and an initial API key).
 #
-# Usage: setup-gcp-project.sh --project <id> [--service-account-name <name>] [--key-file <path>]
+# Usage: setup-control-project.sh --project <id> [--service-account-name <name>] [--key-file <path>]
 set -euo pipefail
 
 SERVICE_ACCOUNT_NAME="sprinkles"
@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${PROJECT}" ]]; then
-  echo "usage: setup-gcp-project.sh --project <id> [--service-account-name <name>] [--key-file <path>]" >&2
+  echo "usage: setup-control-project.sh --project <id> [--service-account-name <name>] [--key-file <path>]" >&2
   exit 1
 fi
 
