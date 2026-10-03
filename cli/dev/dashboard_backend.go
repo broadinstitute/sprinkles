@@ -815,15 +815,22 @@ func ensureSlotsResource(resources []sprinkles.ResourceEntry) []sprinkles.Resour
 // applyWorkpoolDefaults fills in fields of spec that were omitted from the
 // submission with defaults, either fixed values or ones supplied by config
 // (for settings not yet exposed by the openapi.yaml request schema).
-func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SprinklesConfig) {
+func applyWorkpoolDefaults(spec *WorkpoolSpec, config *SprinklesConfig, projectID string) {
 	if spec.RootDir == "" {
 		spec.RootDir = "/mnt/sprinkles"
 	}
 	if spec.SprinklesWorkerGCSPath == "" {
 		spec.SprinklesWorkerGCSPath = config.SprinklesWorkerGCSPath
 	}
+	if spec.ProjectID == "" {
+		spec.ProjectID = projectID
+	}
 	if spec.ServiceAccount == "" {
-		spec.ServiceAccount = config.ServiceAccount
+		if spec.ProjectID != projectID {
+			spec.ServiceAccount = "sprinkles-worker@" + spec.ProjectID + ".iam.gserviceaccount.com"
+		} else {
+			spec.ServiceAccount = config.ServiceAccount
+		}
 	}
 	spec.Resources = ensureSlotsResource(spec.Resources)
 	if spec.EmptyVolumes == nil {
@@ -927,8 +934,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	if user := userFromContext(ctx); user != "" {
 		req.Labels = append(req.Labels, sprinkles.Label{Name: "user", Value: user})
 	}
-
-	applyWorkpoolDefaults(&req.Workpool, s.config)
+	applyWorkpoolDefaults(&req.Workpool, s.config, s.project)
 
 	workpoolID, err := resolveWorkpoolID(&req.Workpool)
 	if err != nil {
