@@ -47,6 +47,13 @@ func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 		for _, ws := range pools {
 			if err := a.runProvisioningPollForWorkpool(ctx, ws); err != nil {
 				log.Printf("provisioning poll: workpool %s: %v", ws.Pool.WorkpoolID, err)
+				a.errorLog.Add("provisioning poll: workpool %s: %v", ws.Pool.WorkpoolID, err)
+			}
+			// Last step for each pool: halt it if its most recent batch
+			// outcomes (including failed create-job attempts) all failed.
+			if err := a.checkHaltThreshold(ctx, ws.Pool, ws.State); err != nil {
+				log.Printf("provisioning poll: workpool %s: %v", ws.Pool.WorkpoolID, err)
+				a.errorLog.Add("provisioning poll: workpool %s: %v", ws.Pool.WorkpoolID, err)
 			}
 		}
 	}
@@ -166,6 +173,7 @@ func (a *Monitor) submitBatch(ctx context.Context, pool *WorkPool, vmCount int, 
 		BootDiskSizeGb:        pool.BootDiskSizeGb,
 		BootDiskType:          pool.BootDiskType})
 	if err != nil {
+		a.recordIncident(ctx, pool.WorkpoolID, IncidentTypeBatchCreateFailure, err.Error())
 		if a.batchOutcomes != nil {
 			if pubErr := a.batchOutcomes.PublishBatchFailed(ctx, pool.WorkpoolID, err.Error()); pubErr != nil {
 				log.Printf("submitBatch: publish batch_failed for workpool %s: %v", pool.WorkpoolID, pubErr)

@@ -21,6 +21,34 @@ func TestProvision_NoPendingTasks_NoBatchCreated(t *testing.T) {
 	assert.Equal(t, 0, w.Batches.Count())
 }
 
+func TestProvision_CreateError_RecordsIncidentAndHaltsAfterThreshold(t *testing.T) {
+	w := newWorld()
+	pool := defaultPool("pool-1")
+	pool.MaxConsecutiveFailedBatches = 2
+	w.Pools.Add(pool)
+	for i := 0; i < 3; i++ {
+		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
+	}
+	w.BatchAPI.CreateJobErr = fmt.Errorf("403: caller does not have permission to act as service account")
+
+	// First failure: incident recorded, still below the threshold.
+	require.NoError(t, w.A.runProvisioningPoll(context.Background()))
+	assert.NotEqual(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
+
+	// Second consecutive failure: halted.
+	require.NoError(t, w.A.runProvisioningPoll(context.Background()))
+	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
+	assert.Equal(t, 2, w.BatchAPI.CreateJobCalls)
+
+	incidents, err := w.Events.ListRecentWorkpoolIncidentsByType(context.Background(), "pool-1", IncidentTypeBatchCreateFailure, epoch.Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Len(t, incidents, 2)
+
+	// Halted pools are no longer provisioned.
+	require.NoError(t, w.A.runProvisioningPoll(context.Background()))
+	assert.Equal(t, 2, w.BatchAPI.CreateJobCalls)
+}
+
 func TestProvision_CopiesPoolLabelsOntoJobAndBatchRequest(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")

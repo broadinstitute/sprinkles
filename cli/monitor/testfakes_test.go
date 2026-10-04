@@ -51,6 +51,11 @@ type FakeBatchAPIClient struct {
 	TerminatedVMs  []FakeTerminatedVM
 	TerminatedJobs []string
 
+	// CreateJobErr, if set, makes every CreateJob call fail with it.
+	// CreateJobCalls counts all CreateJob calls, successful or not.
+	CreateJobErr   error
+	CreateJobCalls int
+
 	// DebugInfo, if set, is returned by GetBatchDebuggingInfo for every call.
 	DebugInfo string
 }
@@ -110,6 +115,12 @@ func (f *FakeBatchAPIClient) RemoveVM(instanceName string) {
 func (f *FakeBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+
+	if f.CreateJobErr != nil {
+		f.CreateJobCalls++
+		return "", f.CreateJobErr
+	}
+	f.CreateJobCalls++
 
 	f.nextJobID++
 	jobID := fmt.Sprintf("job-%d", f.nextJobID)

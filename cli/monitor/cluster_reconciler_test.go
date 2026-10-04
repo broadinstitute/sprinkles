@@ -162,6 +162,10 @@ func TestClusterReconciler_FailedBatchTriggersHaltThreshold(t *testing.T) {
 	err := w.A.runClusterReconciler(context.Background())
 	require.NoError(t, err)
 
+	// The reconciler only records the failure; halting is decided by the
+	// provisioning poll's end-of-pool checkHaltThreshold.
+	assert.NotEqual(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
+	require.NoError(t, w.A.runProvisioningPoll(context.Background()))
 	assert.Equal(t, WorkPoolStatusHalted, w.Pools.MustGetState("pool-1").State)
 }
 

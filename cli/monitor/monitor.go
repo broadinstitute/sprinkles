@@ -65,6 +65,10 @@ const (
 	// IncidentTypeBatchAPIFailure: GCP's Batch API itself reported the job
 	// as failed.
 	IncidentTypeBatchAPIFailure = "batch_api_failure"
+	// IncidentTypeBatchCreateFailure: the Batch API rejected (or failed) the
+	// request to create a job — typically a permissions or configuration
+	// problem, e.g. the caller can't act as the workpool's service account.
+	IncidentTypeBatchCreateFailure = "batch_create_failure"
 )
 
 // activeTasks is the set of task statuses that are orphaned back to pending when a worker dies.
@@ -423,9 +427,9 @@ func (a *Monitor) recordIncident(ctx context.Context, workpoolID, incidentType, 
 }
 
 // markBatchFailed records batch as failed (GCP itself reported the job as
-// failed), logs an incident, publishes a batch_failed event, and checks the
-// halt threshold. Use markBatchTerminated instead when the monitor is the
-// one deciding to kill an otherwise-live job.
+// failed), logs an incident, and publishes a batch_failed event. Use
+// markBatchTerminated instead when the monitor is the one deciding to kill an
+// otherwise-live job.
 func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, reason string, now time.Time) error {
 	return a.markBatchDone(ctx, ws, batch, BatchStatusFailed, IncidentTypeBatchAPIFailure, reason, now)
 }
@@ -433,9 +437,9 @@ func (a *Monitor) markBatchFailed(ctx context.Context, ws *WorkPoolWithState, ba
 // markBatchTerminated records batch as terminated (the monitor's own
 // bookkeeping — VM counts, worker registrations, heartbeats — found an
 // anomaly and killed a job GCP hadn't reported any problem with), sets
-// TerminationReason, logs an incident, publishes a batch_failed event (the
+// TerminationReason, logs an incident, and publishes a batch_failed event (the
 // same outcome event type as markBatchFailed — both mean "this batch didn't
-// work out" for halt-counting purposes), and checks the halt threshold.
+// work out" for halt-counting purposes).
 func (a *Monitor) markBatchTerminated(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, incidentType, reason string, now time.Time) error {
 	batch.TerminationReason = reason
 	return a.markBatchDone(ctx, ws, batch, BatchStatusTerminated, incidentType, reason, now)
@@ -443,8 +447,9 @@ func (a *Monitor) markBatchTerminated(ctx context.Context, ws *WorkPoolWithState
 
 // markBatchDone centralizes the pattern repeated across
 // cluster_reconciler.go and batch_startup_monitor.go's failure-detection
-// call sites: set batch.Status/Unhealthy, save it, log an incident, publish
-// a batch_failed event, and check the halt threshold.
+// call sites: set batch.Status/Unhealthy, save it, log an incident, and
+// publish a batch_failed event. Halting is not decided here:
+// checkHaltThreshold runs periodically from the provisioning poll.
 func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batch *BatchAPIRequest, status BatchStatus, incidentType, reason string, now time.Time) error {
 	batch.Status = status
 	batch.Unhealthy = true
@@ -457,7 +462,7 @@ func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batc
 			a.errorLog.Add("markBatchDone: publish batch_failed for workpool %s: %v", ws.Pool.WorkpoolID, err)
 		}
 	}
-	return a.checkHaltThreshold(ctx, ws.Pool, ws.State)
+	return nil
 }
 
 // checkHaltThreshold transitions the workpool to halted if the last N batch
