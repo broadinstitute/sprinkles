@@ -793,6 +793,7 @@ function WorkPoolPropertiesPanel({
           )
         }
       />
+      <DetailRow label="service account" value={detail.service_account || dash} />
       <DetailRow label="machine type" value={detail.machine_type || dash} />
       <DetailRow label="region" value={detail.region || dash} />
       <DetailRow

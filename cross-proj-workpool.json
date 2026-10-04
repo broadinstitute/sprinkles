@@ -1,0 +1,17 @@
+{
+  "id": "cross-project-test",
+  "projectID": "depmap-portal-pipeline",
+  "machineType": "n2-standard-2",
+  "rootDir": "/mnt/sprinkles",
+  "region": "us-central1",
+  "zones": ["us-central1-a", "us-central1-b", "us-central1-c", "us-central1-f"],
+  "maxWorkerCount": 1,
+  "maxPreemptibleWorkerAttempts": 0,
+  "maxWorkersPerRequest": 2,
+  "resources": [{ "name": "slots", "value": 1 }],
+  "emptyVolumes": [],
+  "sprinklesWorkerGCSPath": "gs://sparkles-v100/bin/sprinkles-linux-amd64-dev",
+  "serviceAccount": "sprinkles-worker@depmap-portal-pipeline.iam.gserviceaccount.com",
+  "dbName": "sparkles",
+  "lingerTimeSec": 600
+}

@@ -80,6 +80,7 @@ Get a single workpool's configuration and current status.
 {
   "workpool_id": "string",
   "project_id": "string",
+  "service_account": "string",
   "machine_type": "string",
   "region": "string",
   "zones": ["string"],

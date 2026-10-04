@@ -140,6 +140,8 @@ export interface WorkPoolDetail {
   workpool_id: string;
   /** Empty when the workpool runs its VMs in the backend's own project. */
   project_id: string;
+  /** Email of the service account worker VMs run as. */
+  service_account: string;
   machine_type: string;
   region: string;
   zones: string[];

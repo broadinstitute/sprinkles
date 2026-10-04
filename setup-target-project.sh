@@ -160,7 +160,8 @@ grant_project_roles "${TARGET_PROJECT}" "serviceAccount:${WORKER_SA_EMAIL}" \
   roles/storage.objectAdmin
 
 # Workers claim tasks and report state against the control plane's Firestore
-# and Pub/Sub, and write results/logs to GCS there.
+# and Pub/Sub, read the staged worker binary from GCS there, and write
+# results/logs to it (roles/storage.objectAdmin covers both read and write).
 echo "==> Granting control-plane roles on ${SPRINKLES_PROJECT} to ${WORKER_SA_EMAIL}..."
 grant_project_roles "${SPRINKLES_PROJECT}" "serviceAccount:${WORKER_SA_EMAIL}" \
   roles/datastore.user \

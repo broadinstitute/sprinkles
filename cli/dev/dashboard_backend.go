@@ -224,7 +224,9 @@ type workpoolDetailResponse struct {
 	WorkpoolID string `json:"workpool_id"`
 	// ProjectID is empty when the workpool didn't override it, meaning its
 	// Batch jobs/VMs run in whichever project the backend was started with.
-	ProjectID                    string                    `json:"project_id"`
+	ProjectID string `json:"project_id"`
+	// ServiceAccount is the email of the service account worker VMs run as.
+	ServiceAccount               string                    `json:"service_account"`
 	MachineType                  string                    `json:"machine_type"`
 	Region                       string                    `json:"region"`
 	Zones                        []string                  `json:"zones"`
@@ -281,6 +283,7 @@ func (s *dashboardServer) handleGetWorkpool(w http.ResponseWriter, r *http.Reque
 	resp := workpoolDetailResponse{
 		WorkpoolID:                   wp.WorkpoolID,
 		ProjectID:                    wp.ProjectID,
+		ServiceAccount:               wp.ServiceAccount,
 		MachineType:                  wp.MachineType,
 		Region:                       wp.Region,
 		Zones:                        wp.Zones,
