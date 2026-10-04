@@ -320,6 +320,11 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 						log.Printf("Waking up provision check due to %s event", string(n.EventType))
 						notifyProvisioning()
 					}
+					if n.EventType == "job_created" && n.JobID != "" && a.jobSummaries != nil {
+						if err := a.reviveJobSummary(ctx, n.JobID); err != nil {
+							a.errorLog.Add("reviving job summary for job %s: %v", n.JobID, err)
+						}
+					}
 					if notifyJobSummary != nil {
 						log.Printf("Waking up job summarizer due to %s event", string(n.EventType))
 						notifyJobSummary()
@@ -549,6 +554,13 @@ func (a *Monitor) RunRequeueOrphanedTasks(ctx context.Context) error {
 // Exported for functional tests; requires SetJobSummaryStore to have been called.
 func (a *Monitor) RunJobSummaryPoll(ctx context.Context) error {
 	return a.runJobSummaryPoll(ctx)
+}
+
+// ReviveJobSummary recomputes the JobSummary for jobID if it is terminal, as
+// done on a job_created event for a retried job. Exported for functional tests;
+// requires SetJobSummaryStore to have been called.
+func (a *Monitor) ReviveJobSummary(ctx context.Context, jobID string) error {
+	return a.reviveJobSummary(ctx, jobID)
 }
 
 // param returns v if v != 0, otherwise def. Used to apply per-workpool defaults.

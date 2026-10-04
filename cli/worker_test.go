@@ -122,6 +122,17 @@ func (q *mockTaskQueue) RecordResourceUsage(_ context.Context, _ string, _ *Reso
 	return nil
 }
 
+func (q *mockTaskQueue) RecordPriorResultSuccess(_ context.Context, taskID string) error {
+	t := q.taskByID(taskID)
+	if t == nil {
+		return fmt.Errorf("task %s not found", taskID)
+	}
+	t.Status = StatusSuccess
+	t.FoundPriorResult = true
+	t.OwningWorkerID = ""
+	return nil
+}
+
 // --- recordingDockerCommand ---
 
 // recordingDockerCommand writes the invocation as "image extraArgs... command" to
@@ -191,6 +202,7 @@ func makeTask(taskID, jobID, workpoolID string) *Task {
 		Status:      StatusPending,
 		Command:     []string{"echo", "hello"},
 		DockerImage: "ubuntu:latest",
+		ResultPath:  "gs://test-bucket/results/" + taskID,
 		LogPath:     "gs://test-bucket/logs/" + taskID,
 	}
 }

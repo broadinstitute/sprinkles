@@ -26,6 +26,26 @@ func (a *Monitor) runJobSummaryPoll(ctx context.Context) error {
 	return nil
 }
 
+// reviveJobSummary handles a job_created event for a job whose JobSummary is
+// already terminal -- which happens when a retry puts tasks of a finished job
+// back to pending. runJobSummaryPoll only looks at non-terminal summaries, so
+// without this a retried job would never be recomputed. The summary is
+// recomputed from the current task counts (and its expiry extended); if the
+// retry has not reset any tasks yet it simply stays terminal. A missing or
+// non-terminal summary (the normal case for a newly created job) is left to
+// the regular poll.
+func (a *Monitor) reviveJobSummary(ctx context.Context, jobID string) error {
+	summary, err := a.jobSummaries.Get(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if summary == nil || !IsTerminalJobStatus(summary.State) {
+		return nil
+	}
+	summary.Expiry = time.Now().Add(7 * 24 * time.Hour)
+	return a.updateJobSummary(ctx, summary)
+}
+
 func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) error {
 	counts, err := a.tasks.CountByJob(ctx, summary.JobID)
 	if err != nil {

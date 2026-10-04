@@ -21,7 +21,10 @@ import (
 
 // submitJobResponse mirrors openapi.yaml's SubmitJobResponse schema.
 type submitJobResponse struct {
-	ID string `json:"id"`
+	ID         string `json:"id"`
+	Retried    bool   `json:"retried"`
+	ResetTasks int    `json:"resetTasks"`
+	Warning    string `json:"warning"`
 }
 
 // submitAPIError mirrors openapi.yaml's Error schema.
@@ -318,7 +321,14 @@ func runSubmit(c *cli.Context) error {
 		if err := json.Unmarshal(respBody, &result); err != nil {
 			return fmt.Errorf("job submitted, but could not parse response: %w (body: %s)", err, respBody)
 		}
-		fmt.Printf("Job submitted successfully: id=%s\n", result.ID)
+		if result.Retried {
+			fmt.Printf("Retrying existing job: id=%s (%d tasks reset to pending)\n", result.ID, result.ResetTasks)
+		} else {
+			fmt.Printf("Job submitted successfully: id=%s\n", result.ID)
+		}
+		if result.Warning != "" {
+			fmt.Printf("Warning: %s\n", result.Warning)
+		}
 		return nil
 	}
 

@@ -246,6 +246,10 @@ type WorkerLoopConfig struct {
 // ErrTaskKilled is returned by the task callback when a task was cancelled via a kill_job message.
 var ErrTaskKilled = errors.New("task killed")
 
+// ErrPriorResultFound is returned by the task callback when a task_summary.json
+// with exit_code 0 already exists at the task's ResultPath, so the task was not run.
+var ErrPriorResultFound = errors.New("prior successful result found")
+
 const UnknownLeader = 0
 const IsLeader = 1
 const IsNotLeader = 2
@@ -339,6 +343,12 @@ func (ls *loopState) waitForCompletion(ctx context.Context, queue TaskQueue) err
 				log.Printf("recording task %s as killed: %v", c.taskID, err)
 				return err
 			}
+		} else if errors.Is(c.err, ErrPriorResultFound) {
+			log.Printf("%s: task not run, found prior successful result", c.taskID)
+			if err := queue.RecordPriorResultSuccess(ctx, c.taskID); err != nil {
+				log.Printf("recording task %s as success from prior result: %v", c.taskID, err)
+				return err
+			}
 		} else if c.err != nil {
 			log.Printf("task %s failed: %v", c.taskID, c.err)
 			var exitErr *exec.ExitError
@@ -404,6 +414,10 @@ func executeTaskBody(ctx context.Context, cfg *WorkerLoopConfig, t *Task) error 
 	taskCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	if priorResultSucceeded(taskCtx, cfg.TransferClient, t) {
+		return ErrPriorResultFound
+	}
+
 	files, err := resolveFilesToLocalize(taskCtx, cfg.TransferClient, t)
 	if err != nil {
 		return fmt.Errorf("resolving files to localize: %w", err)
@@ -452,6 +466,13 @@ func executeTaskBody(ctx context.Context, cfg *WorkerLoopConfig, t *Task) error 
 			return fmt.Errorf("marking task %s writing: %w", t.TaskID, err)
 		}
 		uploadResultsErr = uploadResults(ctx, cfg.TransferClient, paths, t.ResultPath, t.LogPath)
+		// task_summary.json goes last so its presence means every other output
+		// uploaded. Only written when the command actually ran to an exit code.
+		if uploadResultsErr == nil {
+			if exitCode, ok := taskExitCode(dockerExecErr); ok {
+				uploadResultsErr = uploadTaskSummary(ctx, cfg.TransferClient, paths, t.ResultPath, exitCode)
+			}
+		}
 	}
 	log.Printf("Task %s: Uploaded results", t.TaskID)
 	closeErr := tel.Close()
@@ -722,6 +743,75 @@ func uploadResults(ctx context.Context, tc TransferClient, paths *TaskPaths, res
 		destGCSPath := strings.TrimSuffix(resultPath, "/") + "/" + filepath.ToSlash(relPath)
 		return tc.uploadFile(ctx, localPath, destGCSPath)
 	})
+}
+
+// taskExitCode extracts the process exit code from the error returned by the
+// docker command. ok is false when the command did not run to an exit code
+// (an infrastructure failure), in which case no task_summary.json is written.
+func taskExitCode(dockerExecErr error) (code int, ok bool) {
+	if dockerExecErr == nil {
+		return 0, true
+	}
+	var exitErr *exec.ExitError
+	if errors.As(dockerExecErr, &exitErr) {
+		return exitErr.ExitCode(), true
+	}
+	return 0, false
+}
+
+// uploadTaskSummary writes <resultPath>/task_summary.json recording the exit code.
+func uploadTaskSummary(ctx context.Context, tc TransferClient, paths *TaskPaths, resultPath string, exitCode int) error {
+	data, err := json.MarshalIndent(TaskSummary{ExitCode: exitCode, FinishedAt: time.Now().UTC()}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshalling task summary: %w", err)
+	}
+	// Stage outside taskWorkDir so it can never be mistaken for a task output.
+	localPath := filepath.Join(paths.workDir, TaskSummaryFile)
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
+		return fmt.Errorf("writing task summary: %w", err)
+	}
+	defer os.Remove(localPath)
+	destPath := strings.TrimSuffix(resultPath, "/") + "/" + TaskSummaryFile
+	if err := tc.uploadFile(ctx, localPath, destPath); err != nil {
+		return fmt.Errorf("uploading task summary: %w", err)
+	}
+	return nil
+}
+
+// priorResultSucceeded reports whether <t.ResultPath>/task_summary.json exists,
+// parses, and records exit_code 0. Any problem reading it means "no": the task
+// is simply run normally.
+func priorResultSucceeded(ctx context.Context, tc TransferClient, t *Task) bool {
+	if t.ResultPath == "" {
+		return false
+	}
+	tmp, err := os.CreateTemp("", "task-summary-*.json")
+	if err != nil {
+		log.Printf("Task %s: prior result check: %v", t.TaskID, err)
+		return false
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	if err := tc.downloadFile(ctx, strings.TrimSuffix(t.ResultPath, "/")+"/"+TaskSummaryFile, tmpPath); err != nil {
+		return false // normal case: no prior result
+	}
+	data, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return false
+	}
+	var summary TaskSummary
+	if err := json.Unmarshal(data, &summary); err != nil {
+		log.Printf("Task %s: ignoring unparseable prior %s: %v", t.TaskID, TaskSummaryFile, err)
+		return false
+	}
+	if summary.ExitCode != 0 {
+		log.Printf("Task %s: prior result has exit_code %d, re-running", t.TaskID, summary.ExitCode)
+		return false
+	}
+	log.Printf("Task %s: found prior successful result at %s, skipping execution", t.TaskID, t.ResultPath)
+	return true
 }
 
 func mergeErrors(errs ...error) error {

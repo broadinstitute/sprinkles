@@ -454,6 +454,8 @@ type JobSummaryHistory struct {
 type JobSummaryStore interface {
 	// Create writes the initial JobSummary for a new job.
 	Create(ctx context.Context, summary *JobSummary) error
+	// Get returns the JobSummary for jobID, or nil if there is none.
+	Get(ctx context.Context, jobID string) (*JobSummary, error)
 	// ListNonTerminal returns all JobSummary documents whose state is not terminal.
 	ListNonTerminal(ctx context.Context) ([]*JobSummary, error)
 	// Save replaces an existing JobSummary document.

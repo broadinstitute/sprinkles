@@ -7,6 +7,8 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const batchRequestCollection = "BatchAPIRequests"
@@ -644,6 +646,21 @@ func NewFirestoreJobSummaryStore(fs *firestore.Client) *FirestoreJobSummaryStore
 func (s *FirestoreJobSummaryStore) Create(ctx context.Context, summary *JobSummary) error {
 	_, err := s.fs.Collection(jobSummaryCollection).Doc(summary.JobID).Set(ctx, summary)
 	return err
+}
+
+func (s *FirestoreJobSummaryStore) Get(ctx context.Context, jobID string) (*JobSummary, error) {
+	snap, err := s.fs.Collection(jobSummaryCollection).Doc(jobID).Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var doc JobSummary
+	if err := snap.DataTo(&doc); err != nil {
+		return nil, err
+	}
+	return &doc, nil
 }
 
 func (s *FirestoreJobSummaryStore) ListNonTerminal(ctx context.Context) ([]*JobSummary, error) {

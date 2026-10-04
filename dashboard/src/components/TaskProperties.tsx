@@ -16,6 +16,7 @@ interface Props {
   labels: { name: string; value: string }[];
   workpoolId: string;
   resourceUsage: ResourceUsageSummary | null;
+  foundPriorResult?: boolean;
   timings: TimingWindows;
   status: string;
 }
@@ -531,6 +532,7 @@ export default function TaskProperties({
   failureReason,
   labels,
   resourceUsage,
+  foundPriorResult,
   timings,
   status,
 }: Props) {
@@ -591,6 +593,16 @@ export default function TaskProperties({
       </span>
     ),
   });
+  if (foundPriorResult) {
+    detailRows.push({
+      label: "prior result",
+      value: (
+        <span style={{ font: `500 13px ${MONO}`, color: "#2b3138" }}>
+          not run: reused a successful result already at the output path
+        </span>
+      ),
+    });
+  }
   if (exitCode != null) {
     detailRows.push({
       label: "exit code",

@@ -27,6 +27,16 @@ paths:
                 $ref: "#/components/schemas/SubmitJobResponse"
         "400":
           description: Invalid input
+        "409":
+          description: |-
+            A live job with the same result path already exists, but the
+            submission has a different number of tasks or different task
+            commands. A submission whose tasks match is retried instead; see
+            SubmitJobResponse.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "403":
           description: Missing or invalid API key
           content:
@@ -98,11 +108,13 @@ components:
         resultPath:
           type: string
           description: |-
-            Optional GCS "directory" prefix (a gs:// URL). If set, once every task in
-            the job reaches a terminal state, the monitor writes a job_summary.json
-            file under it containing the job, its tasks, and its workpool. Stored as
-            `Job.ResultPath` (firestore field `result_path`). If omitted, no summary
-            is written.
+            Optional GCS "directory" prefix (a gs:// URL). Defaults to
+            `<gcs_prefix>/<name>`. It is the job's identity: submitting a job
+            whose result path matches a live job retries that job. Task result
+            paths default to `<resultPath>/<task index>`, and once every task
+            reaches a terminal state the monitor writes a job_summary.json file
+            under it containing the job, its tasks, and its workpool. Stored as
+            `Job.ResultPath` (firestore field `result_path`).
 
     Label:
       type: object
@@ -410,7 +422,21 @@ components:
       properties:
         id:
           type: string
-          description: The generated job ID. Corresponds to `Job.JobID` (firestore field `job_id`), a UUID assigned at submission time.
+          description: |-
+            The generated job ID. Corresponds to `Job.JobID` (firestore field `job_id`), a UUID assigned at submission time.
+            If `retried` is true, the ID of the existing job that was retried.
+        retried:
+          type: boolean
+          description: |-
+            True if the submission's result path matched a live job, which was
+            retried (its error/failed/killed tasks reset to pending) instead
+            of a new job being created. Omitted otherwise.
+        resetTasks:
+          type: integer
+          description: Number of tasks put back to pending. Only present on a retry.
+        warning:
+          type: string
+          description: Non-fatal problem with a retry, e.g. the job's workpool is halted.
 
     Error:
       type: object

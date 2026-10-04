@@ -9,15 +9,18 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
+	"cloud.google.com/go/storage"
 	"github.com/broadinstitute/sprinkles"
 	"github.com/broadinstitute/sprinkles/dev/webui"
 	"github.com/broadinstitute/sprinkles/monitor"
@@ -25,6 +28,7 @@ import (
 	"github.com/urfave/cli"
 	iamcredentials "google.golang.org/api/iamcredentials/v1"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -33,9 +37,15 @@ import (
 // ----- handler context -----
 
 type dashboardServer struct {
-	project  string
-	fs       *firestore.Client
-	ps       *pubsub.Client
+	project string
+	fs      *firestore.Client
+	ps      *pubsub.Client
+	// gcs is created on first use (see gcsClient) to delete job_summary.json
+	// when a job is retried; its credentials need delete access on
+	// config.GCSPrefix.
+	gcsOnce  sync.Once
+	gcs      *storage.Client
+	gcsErr   error
 	config   *SprinklesConfig
 	errorLog *monitor.ErrorLog
 	// pollerStats is nil when no monitor runs in this process.
@@ -800,6 +810,13 @@ type submitJobRequest struct {
 // submitJobResponse mirrors openapi's SubmitJobResponse schema.
 type submitJobResponse struct {
 	ID string `json:"id"`
+	// Retried is true when the submission matched an existing job (same
+	// result path), which was retried instead of a new job being created.
+	Retried bool `json:"retried,omitempty"`
+	// ResetTasks is the number of tasks put back to pending by a retry.
+	ResetTasks int `json:"resetTasks,omitempty"`
+	// Warning carries a non-fatal problem with a retry, e.g. a halted workpool.
+	Warning string `json:"warning,omitempty"`
 }
 
 // ensureSlotsResource returns resources with a "slots" entry added, defaulting
@@ -958,6 +975,39 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// A job's identity is its result path. If a live job already has this
+	// result path, this submission is a retry of it.
+	jobResultPath := strings.TrimSuffix(req.ResultPath, "/")
+	if jobResultPath == "" {
+		jobResultPath = strings.TrimSuffix(s.config.GCSPrefix, "/") + "/" + req.Name
+	}
+	existing, err := s.findLiveJobByResultPath(ctx, jobResultPath)
+	if err != nil {
+		log.Printf("dashboard: SubmitJob looking up job by result path %s: %v", jobResultPath, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to look up existing job")
+		return
+	}
+	if existing != nil {
+		mismatch, err := s.checkRetryCompatible(ctx, existing, req.Tasks)
+		if err != nil {
+			log.Printf("dashboard: SubmitJob checking existing job %s: %v", existing.JobID, err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check existing job")
+			return
+		}
+		if mismatch != "" {
+			writeError(w, http.StatusConflict, "CONFLICT", fmt.Sprintf("job %s with result path %s already exists and %s", existing.JobID, jobResultPath, mismatch))
+			return
+		}
+		resp, err := s.retryJob(ctx, existing)
+		if err != nil {
+			log.Printf("dashboard: SubmitJob retrying job %s: %v", existing.JobID, err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to retry job")
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	now := time.Now()
 	workpool := sprinkles.WorkPool{
 		WorkpoolID:             workpoolID,
@@ -1005,7 +1055,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 		TaskCount:  len(req.Tasks),
 		Resources:  ensureSlotsResource(req.Resources),
 		Labels:     req.Labels,
-		ResultPath: req.ResultPath,
+		ResultPath: jobResultPath,
 	}
 
 	// Pre-generate task IDs outside the transaction so retries are idempotent.
@@ -1019,7 +1069,7 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 			return err
 		}
 		for i, t := range req.Tasks {
-			taskPrefix := fmt.Sprintf("%s/%s/%d", s.config.GCSPrefix, req.Name, i)
+			taskPrefix := fmt.Sprintf("%s/%d", jobResultPath, i)
 			resultPath := taskPrefix
 			if t.Destination != "" {
 				resultPath = t.Destination
@@ -1080,6 +1130,169 @@ func (s *dashboardServer) handleSubmitJob(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, submitJobResponse{ID: jobID})
+}
+
+// gcsClient returns the server's GCS client, creating it on first use so that
+// the handler can be built (and everything else served) without GCS credentials.
+// GCS_EMULATOR_ENDPOINT is honoured, as elsewhere.
+func (s *dashboardServer) gcsClient() (*storage.Client, error) {
+	s.gcsOnce.Do(func() {
+		var opts []option.ClientOption
+		if endpoint := os.Getenv("GCS_EMULATOR_ENDPOINT"); endpoint != "" {
+			opts = append(opts, option.WithEndpoint(endpoint), option.WithoutAuthentication())
+		}
+		s.gcs, s.gcsErr = storage.NewClient(context.Background(), opts...)
+	})
+	return s.gcs, s.gcsErr
+}
+
+// findLiveJobByResultPath returns the most recently created, unexpired job
+// whose result path is resultPath, or nil if there is none.
+func (s *dashboardServer) findLiveJobByResultPath(ctx context.Context, resultPath string) (*sprinkles.Job, error) {
+	iter := s.fs.Collection(sprinkles.JobCollection).Where("result_path", "==", resultPath).Documents(ctx)
+	defer iter.Stop()
+
+	now := time.Now()
+	var best *sprinkles.Job
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			return best, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		var job sprinkles.Job
+		if err := snap.DataTo(&job); err != nil {
+			return nil, err
+		}
+		if !job.Expiry.After(now) {
+			continue
+		}
+		if best == nil || job.CreatedAt.After(best.CreatedAt) {
+			j := job
+			best = &j
+		}
+	}
+}
+
+// checkRetryCompatible compares a resubmission against an existing job. It
+// returns "" if the number of tasks and each task's command match, else a
+// description of the mismatch (suitable for a 409).
+func (s *dashboardServer) checkRetryCompatible(ctx context.Context, job *sprinkles.Job, reqTasks []submitTaskRequest) (string, error) {
+	existing, err := sprinkles.NewFirestoreTaskQueue(s.fs, nil).ListTasksForJob(ctx, job.JobID)
+	if err != nil {
+		return "", err
+	}
+	if len(existing) != len(reqTasks) {
+		return fmt.Sprintf("has %d tasks but the submission has %d", len(existing), len(reqTasks)), nil
+	}
+	byIndex := make(map[int]*sprinkles.Task, len(existing))
+	for _, t := range existing {
+		byIndex[t.TaskIndex] = t
+	}
+	for i, rt := range reqTasks {
+		et, ok := byIndex[i]
+		if !ok {
+			return fmt.Sprintf("has no task with index %d", i), nil
+		}
+		if !slices.Equal(et.Command, rt.Command) {
+			return fmt.Sprintf("task %d has a different command", i), nil
+		}
+	}
+	return "", nil
+}
+
+// retryJob puts a job's error/failed/killed tasks back to pending so they run
+// again, leaving success, pending and in-flight tasks alone. If anything was
+// reset it also deletes the stale job_summary.json, extends the expiry of the
+// job and its tasks, and publishes job_created, on which the monitor revives
+// the job's (terminal) JobSummary. JobSummary itself is never written here.
+func (s *dashboardServer) retryJob(ctx context.Context, job *sprinkles.Job) (submitJobResponse, error) {
+	resp := submitJobResponse{ID: job.JobID, Retried: true}
+
+	retryable, err := sprinkles.RetryableTasks(ctx, s.fs, job.JobID)
+	if err != nil {
+		return resp, fmt.Errorf("listing tasks: %w", err)
+	}
+	// Delete the summary before touching any task: if this fails nothing has
+	// changed, and if a later step fails a repeat call deletes it again.
+	if len(retryable) > 0 && job.ResultPath != "" {
+		gcs, err := s.gcsClient()
+		if err != nil {
+			return resp, fmt.Errorf("creating GCS client: %w", err)
+		}
+		if err := sprinkles.DeleteJobSummary(ctx, gcs, job.ResultPath); err != nil {
+			return resp, err
+		}
+	}
+
+	ep := sprinkles.NewEventPublisher(s.ps.Publisher("sprinkles-events"), s.fs)
+	defer ep.Stop()
+	n, err := sprinkles.ResetTasksToPending(ctx, s.fs, ep, retryable)
+	resp.ResetTasks = n
+	if err != nil {
+		return resp, err
+	}
+
+	if n > 0 {
+		newExpiry := time.Now().Add(7 * 24 * time.Hour)
+		if _, err := s.fs.Collection(sprinkles.JobCollection).Doc(job.JobID).Update(ctx, []firestore.Update{{Path: "expiry", Value: newExpiry}}); err != nil {
+			return resp, fmt.Errorf("extending job expiry: %w", err)
+		}
+		if err := sprinkles.ExtendTaskExpiry(ctx, s.fs, job.JobID, newExpiry); err != nil {
+			return resp, fmt.Errorf("extending task expiry: %w", err)
+		}
+	}
+
+	// The JobSummary is not touched here: the monitor owns it, and on this
+	// job_created event it recomputes a terminal summary of the retried job.
+	if n > 0 {
+		if err := ep.PublishJobCreated(ctx, sprinkles.JobCreatedEvent{JobID: job.JobID, WorkpoolID: job.WorkpoolID}); err != nil {
+			log.Printf("dashboard: retryJob publishing job_created event %s: %v", job.JobID, err)
+		}
+		if snap, err := s.fs.Collection(monitor.CollectionWorkPoolSummary).Doc(job.WorkpoolID).Get(ctx); err == nil {
+			if state, err := snap.DataAt("state"); err == nil && state == string(monitor.WorkPoolStatusHalted) {
+				resp.Warning = fmt.Sprintf("workpool %s is halted; the retried tasks will not run until it is reset", job.WorkpoolID)
+			}
+		}
+	}
+	return resp, nil
+}
+
+// ----- POST /api/v1/job/{job_id}/retry -----
+
+func (s *dashboardServer) handleRetryJob(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+
+	snap, err := s.fs.Collection(sprinkles.JobCollection).Doc(jobID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "job not found")
+			return
+		}
+		log.Printf("dashboard: RetryJob get %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get job")
+		return
+	}
+	var job sprinkles.Job
+	if err := snap.DataTo(&job); err != nil {
+		log.Printf("dashboard: RetryJob DataTo %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to parse job")
+		return
+	}
+	if !job.Expiry.After(time.Now()) {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "job has expired")
+		return
+	}
+	resp, err := s.retryJob(ctx, &job)
+	if err != nil {
+		log.Printf("dashboard: RetryJob %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to retry job")
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ----- GET /api/v1/jobs -----
@@ -1476,6 +1689,9 @@ type taskResponse struct {
 	ExitCode       *int                     `json:"exit_code,omitempty"`
 	ResourceUsage  *sprinkles.ResourceUsage `json:"resource_usage,omitempty"`
 	VMConsoleURL   string                   `json:"vm_console_url,omitempty"`
+	// FoundPriorResult is true when the task was not run because a successful
+	// task_summary.json already existed at its result path.
+	FoundPriorResult bool `json:"found_prior_result,omitempty"`
 }
 
 // instanceNameRe parses the custom "project/<project>/zone/<zone>/instance/<instance>"
@@ -1526,6 +1742,8 @@ func (s *dashboardServer) handleGetTask(w http.ResponseWriter, r *http.Request) 
 		OwningWorkerID: task.OwningWorkerID,
 		FailureReason:  task.FailureReason,
 		Labels:         labels,
+
+		FoundPriorResult: task.FoundPriorResult,
 	}
 	// ExitCode: only include for completed tasks (terminal states record it meaningfully).
 	if !sprinkles.IsActiveStatus(task.Status) && task.Status != sprinkles.StatusPending {
@@ -2277,6 +2495,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/job/{job_id}", srv.handleGetJob)
 	handle("POST /api/v1/job/{job_id}/labels", srv.handleUpdateJobLabels)
 	handle("POST /api/v1/job/{job_id}/cancel", srv.handleCancelJob)
+	handle("POST /api/v1/job/{job_id}/retry", srv.handleRetryJob)
 	handle("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
 	handle("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)

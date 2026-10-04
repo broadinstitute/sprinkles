@@ -42,6 +42,7 @@ export default function TaskDetail() {
     labels: { name: string; value: string }[];
     workpoolId: string;
     resourceUsage: ResourceUsageSummary | null;
+    foundPriorResult: boolean;
   } | null>(null);
   const logBottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -82,6 +83,7 @@ export default function TaskDetail() {
           labels: Array.isArray(d.labels) ? d.labels : [],
           workpoolId: d.workpool_id ?? "",
           resourceUsage: d.resource_usage ?? null,
+          foundPriorResult: d.found_prior_result ?? false,
         })
       )
       .catch(() =>
@@ -96,6 +98,7 @@ export default function TaskDetail() {
           labels: [],
           workpoolId: "",
           resourceUsage: null,
+          foundPriorResult: false,
         })
       );
   }, [taskId]);
@@ -270,6 +273,7 @@ export default function TaskDetail() {
             labels={taskInfo?.labels ?? []}
             workpoolId={taskInfo?.workpoolId ?? ""}
             resourceUsage={taskInfo?.resourceUsage ?? null}
+            foundPriorResult={taskInfo?.foundPriorResult ?? false}
             timings={timings}
             status={status}
           />

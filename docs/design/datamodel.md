@@ -22,6 +22,9 @@ One document per submitted job. The document ID is the `job_id`.
 | `task_count`  | int             | Number of tasks in this job (denormalized at submission time)                                                          |
 | `resources`   | []ResourceEntry | Per-task resource requirements (e.g. `slots=1,mem=8`). Workers verify they can satisfy these before claiming any task. |
 | `labels`      | []Label         | User-defined key/value tags. Set at submission time, but mutable afterward — see below.                                |
+| `result_path` | string          | GCS prefix that identifies the job: defaults to `<SprinklesConfig.gcs_prefix>/<name>`, or the submitted `resultPath`. Task result paths nest under it (`<result_path>/<task_index>`). The monitor writes `job_summary.json` here when the job reaches a terminal state. A submission whose `result_path` matches a live job is a **retry** of that job (see below). |
+
+**Retry.** `POST /api/v1/job` with the same `result_path` as an unexpired job (same task count and per-task commands, else `409`) retries that job instead of creating a new one, as does `POST /api/v1/job/{job_id}/retry`: `error`/`failed`/`killed` tasks go back to `pending`, `success`/`pending`/in-flight tasks are untouched, `job_summary.json` is deleted from GCS, expiry of the job and its tasks is extended by 7 days, and a `job_created` event is published. On that event the **monitor** recomputes the job's `JobSummary` if it is terminal (extending its expiry), which is what brings a retried job's summary back to non-terminal; the retry itself never writes `JobSummary`. The event is not durable, so a missed event leaves the summary stale. If no live job matches, a new job is created, and workers skip any task whose `task_summary.json` already reports success (see `Tasks`).
 
 **Labels are mutable after submission.** `POST /api/v1/job/{job_id}/labels` (`handleUpdateJobLabels` in `cli/dev/dashboard_backend.go`) lets a caller add/overwrite (`set`) or delete (`remove`) labels on an existing job, inside a single Firestore transaction that updates both `Jobs.labels` and, if it exists, `JobSummary.labels` (see below) to match. This is the one exception to `Jobs` being otherwise write-once at submission, and to `JobSummary` being written only by submit-at-creation and the monitor thereafter. A label edit does **not** produce a `JobSummaryHistory` snapshot.
 
@@ -68,6 +71,7 @@ One document per task. The document ID is the `task_id`.
 | `failure_reason`             | string           | Human-readable reason for failure; populated when `status` is `failed`                                                                                      |
 | `exit_code`                  | int              | Process exit code; populated when `status` is `error`                                                                                                       |
 | `resource_usage`             | ResourceUsage    | Summary of resources consumed by this task's container; written by the worker after the container exits (best-effort; absent if collection failed)          |
+| `found_prior_result`         | bool             | True only if the worker did not run the task because `<result_path>/task_summary.json` already existed with `exit_code` 0 (see below)                       |
 | `last_updated`               | timestamp        | Updated on every status transition; used by tooling to detect stale documents                                                                               |
 | `expiry`                     | timestamp        | When this document may be garbage-collected (set 7 days out at submission time)                                                                             |
 
@@ -139,6 +143,12 @@ Terminal states — no further transitions except an administrative kill:
 | `killed`  | Task was administratively terminated                                      |
 
 **Three-way terminal split:** `success`/`error`/`failed` model two distinct failure modes. `error` means the task executed fully and the _program itself_ reported a problem — look at the task's output. `failed` means execution did not complete — look at the worker or infrastructure logs. `success` means exit code 0.
+
+**`task_summary.json`.** After a task's command exits and its log and output files have uploaded, the worker writes `<result_path>/task_summary.json` — `{"exit_code": <int>, "finished_at": "<RFC3339>"}` — as the **last** upload, so its presence means the outputs are complete. It is written for every run that reached an exit code (any value), and not at all for infrastructure failures or kills. `exit_code == 0` means success. It is the only record of a task's outcome that outlives the Firestore documents.
+
+**Prior results.** Right after claiming a task (before localizing files), the worker reads `<result_path>/task_summary.json`. If it exists, parses, and has `exit_code` 0, the worker does not run the task: it moves it `claimed` → `success` and sets `found_prior_result`. Anything else (missing, unreadable, corrupt, non-zero exit code) means the task runs normally. This is what lets a resubmitted job whose Firestore records have expired avoid redoing finished work. A task's identity is therefore its result path: a new job reusing a result path whose outputs still exist will skip those tasks even if their commands changed.
+
+**Retry transition.** A retry moves a task `error`/`failed`/`killed` → `pending` (publishing a `task_state_update` event), clearing `failure_reason`, `exit_code`, `owning_worker_id` and `found_prior_result`. This is the only transition out of those terminal states other than being killed.
 
 **Claiming is atomic.** `ClaimTask` uses a Firestore transaction to flip `status` from `pending` → `claimed` and record the `owning_worker_id`. To reduce contention when many workers compete for the same job's tasks, the worker fetches up to 100 pending candidates and shuffles them before attempting the transaction.
 
@@ -731,6 +741,8 @@ Both are consumed by `checkHaltThreshold` (see the `Events` collection section a
 | `running`   | `claimed`                           | Staging complete; task process launched               |
 | `writing`   | `running`                           | Process exited; uploading results to cloud storage    |
 | `success`   | `writing`                           | Upload complete; process exited with code 0           |
+| `success`   | `claimed`                           | Not run: a prior `task_summary.json` with exit code 0 was found (`found_prior_result`) |
+| `pending`   | `error` \| `failed` \| `killed`     | Task retried                                          |
 | `error`     | `writing`                           | Upload complete; process exited with non-zero code    |
 | `failed`    | `claimed` \| `running` \| `writing` | Infrastructure failure; task did not complete         |
 | `pending`   | `claimed` \| `running` \| `writing` | Task orphaned back to pending (worker crash detected) |

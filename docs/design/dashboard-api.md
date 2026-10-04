@@ -20,7 +20,7 @@ All error responses use the same envelope:
 ```json
 {
   "error": "human-readable message",
-  "code": "NOT_FOUND | BAD_REQUEST | INTERNAL_ERROR | FORBIDDEN"
+  "code": "NOT_FOUND | BAD_REQUEST | CONFLICT | INTERNAL_ERROR | FORBIDDEN"
 }
 ```
 
@@ -32,6 +32,7 @@ HTTP status codes:
 | 400 | Invalid request body or query parameter |
 | 403 | Missing or invalid API key |
 | 404 | Entity not found |
+| 409 | Conflict (a job submission matches an existing job's result path but not its tasks) |
 | 500 | Backend or GCP API failure |
 
 ---
@@ -362,15 +363,28 @@ If `workpool.id` is omitted, it's derived deterministically as `"wp-" + sha256(c
 
 The authenticated caller's user (from the API-key auth middleware) is auto-appended as a `user=<name>` label — not something the client sends explicitly.
 
-Task `result_path`/`log_path` are derived as `{SprinklesConfig.gcs_prefix}/{name}/{task_index}` and `.../{task_index}/stdout.txt`.
+An optional top-level `"resultPath"` (a `gs://` prefix) sets the job's `result_path`; if omitted it defaults to `{SprinklesConfig.gcs_prefix}/{name}`. Task `result_path`/`log_path` are derived as `{job result_path}/{task_index}` and `.../{task_index}/stdout.txt`; a task's explicit `destination` overrides its `result_path`.
+
+**Retry of an existing job.** A job's identity is its `result_path`. If a live (unexpired) job already has the same `result_path`, this request is a **retry** of that job rather than a new submission:
+
+- The existing job must have the same number of tasks, and each task's `command` must equal the existing task at the same index; otherwise the request fails with `409 CONFLICT`. Nothing else in the request is compared or applied (workpool, resources, labels, image and files are ignored on a retry).
+- No `WorkPools`, `Jobs`, `Tasks` or `JobSummary` document is created. Instead the existing job is retried exactly as by [`POST /api/v1/job/{job_id}/retry`](#post-apiv1jobjob_idretry), and its ID is returned.
+- If several live jobs share a `result_path` (concurrent submissions race and are not serialized), the most recently created one is used.
+
+If no live job matches, a new job is created. Its tasks may still be skipped by workers: before running, a worker looks for `{task result_path}/task_summary.json` and, if it exists with `exit_code` 0, marks the task `success` with `found_prior_result=true` without running it (see `datamodel.md`).
 
 **Response** `200 OK`:
 
 ```json
-{ "id": "string (the new job_id, a UUID)" }
+{
+  "id": "string (the new job_id, or the existing job_id on a retry)",
+  "retried": "boolean (omitted unless true)",
+  "resetTasks": "integer (retry only: number of tasks put back to pending)",
+  "warning": "string (retry only, optional; e.g. the workpool is halted)"
+}
 ```
 
-**Errors**: `400 BAD_REQUEST` for any validation failure (missing `name`/`machineType`/`image`/`command`, malformed `projectID`, empty `tasks`, unknown JSON fields, invalid resolved workpool ID). `500 INTERNAL_ERROR` for a Firestore write failure at any of the four writes described above. A failure to publish the `job_created` event is logged but does **not** fail the request — the monitor's periodic poll picks up the job regardless.
+**Errors**: `400 BAD_REQUEST` for any validation failure (missing `name`/`machineType`/`image`/`command`, malformed `projectID`, empty `tasks`, unknown JSON fields, invalid resolved workpool ID). `409 CONFLICT` if the submission matches an existing job's `result_path` but not its task count or commands. `500 INTERNAL_ERROR` for a Firestore write failure at any of the four writes described above. A failure to publish the `job_created` event is logged but does **not** fail the request — the monitor's periodic poll picks up the job regardless.
 
 **Firestore**: `Set` on `WorkPools/{workpool_id}`; then, in one transaction, `Set` on `Jobs/{job_id}` and one `Set` per task on `Tasks/{task_id}`; then `Create` on `JobSummary/{job_id}`.
 
@@ -499,6 +513,33 @@ Calling this on a job with no pending tasks (e.g. already fully running, or alre
 **Firestore**: `Jobs/{job_id}` — key lookup, to check existence. `Tasks` — queried for `job_id == {job_id} && status == pending`; each matching task is transitioned to `killed` (guarded against a concurrent claim).
 
 **Pub/Sub**: publishes `{"type": "kill_job", "job_id": "string"}` to the shared `sprinkles-worker-in` topic (not a per-worker destination, since a job's tasks may be spread across many workers) — every worker with a task belonging to this job cancels it.
+
+---
+
+### `POST /api/v1/job/{job_id}/retry`
+
+Retry a job: put its `error`, `failed` and `killed` tasks back to `pending` so they run again. `success`, `pending` and in-flight (`claimed`/`running`/`writing`) tasks are never touched, so retrying a running job is safe (it just resets any failed tasks). Also used by `POST /api/v1/job` when a submission matches an existing job.
+
+**Path parameters**: `job_id` — required. **Request body**: none.
+
+**Response** `200 OK`:
+
+```json
+{ "id": "string", "retried": true, "resetTasks": "integer", "warning": "string (optional)" }
+```
+
+`resetTasks` may be 0 (nothing to retry). `warning` is set when tasks were reset but the job's workpool is `halted`, so they won't run until it is reset.
+
+**Errors**: `404 NOT_FOUND` if the job doesn't exist or has expired. `500 INTERNAL_ERROR` on a Firestore/GCS failure. A failure part way is safe to retry: repeating the call resets whatever is left.
+
+**Effects** (only if at least one task needed resetting, unless noted):
+
+1. Deletes `{job result_path}/job_summary.json` from GCS (a missing object is fine) so GCS doesn't claim the job is complete. This needs the backend's credentials to have delete access on `SprinklesConfig.gcs_prefix`.
+2. Resets the tasks in transactions of at most 200: `status=pending`, clears `failure_reason`, `exit_code`, `owning_worker_id` and `found_prior_result`, sets `last_updated`, and extends `expiry` by 7 days. Publishes a `task_state_update` event per task (`error|failed|killed` → `pending`).
+3. Extends `expiry` (7 days) on `Jobs/{job_id}` and all of the job's `Tasks`.
+4. Publishes `job_created` so the monitor provisions workers promptly. The monitor also uses this event to recompute the job's `JobSummary` if it is terminal (it otherwise only polls non-terminal summaries). `JobSummary` is never written by this endpoint, so it can briefly lag, or stay stale if the monitor misses the event.
+
+**Request size**: the request blocks until every task has been reset.
 
 ---
 

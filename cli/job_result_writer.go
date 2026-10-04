@@ -3,6 +3,7 @@ package sprinkles
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -50,7 +51,7 @@ func (w *JobResultWriter) WriteJobSummary(ctx context.Context, jobID string) err
 		return fmt.Errorf("marshalling job summary: %w", err)
 	}
 
-	destPath := strings.TrimSuffix(job.ResultPath, "/") + "/job_summary.json"
+	destPath := strings.TrimSuffix(job.ResultPath, "/") + "/" + JobSummaryFile
 	bucket, object, err := parseGCSPath(destPath)
 	if err != nil {
 		return err
@@ -61,4 +62,18 @@ func (w *JobResultWriter) WriteJobSummary(ctx context.Context, jobID string) err
 		return fmt.Errorf("uploading job summary to %s: %w", destPath, err)
 	}
 	return gcsWriter.Close()
+}
+
+// DeleteJobSummary removes <resultPath>/job_summary.json. A missing object is
+// not an error.
+func DeleteJobSummary(ctx context.Context, gcsClient *storage.Client, resultPath string) error {
+	destPath := strings.TrimSuffix(resultPath, "/") + "/" + JobSummaryFile
+	bucket, object, err := parseGCSPath(destPath)
+	if err != nil {
+		return err
+	}
+	if err := gcsClient.Bucket(bucket).Object(object).Delete(ctx); err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+		return fmt.Errorf("deleting %s: %w", destPath, err)
+	}
+	return nil
 }

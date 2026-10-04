@@ -376,6 +376,43 @@ function useJobSummaryHistory(
   return { history, lastUpdatedAt };
 }
 
+// RetryJobButton puts the job's error/failed/killed tasks back to pending
+// (POST /api/v1/job/{job_id}/retry); successful and in-flight tasks are left
+// alone. The job's status updates through the usual polling.
+function RetryJobButton({ jobId }: { jobId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const retry = async () => {
+    setBusy(true);
+    setMessage("");
+    try {
+      const r = await apiFetch(`/api/v1/job/${jobId}/retry`, {
+        method: "POST",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data: { resetTasks?: number; warning?: string } = await r.json();
+      setMessage(
+        `${data.resetTasks ?? 0} task(s) reset to pending.` +
+          (data.warning ? ` Warning: ${data.warning}` : "")
+      );
+    } catch (e) {
+      setMessage(`Retry failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 10, fontSize: "0.8rem" }}>
+      <button onClick={retry} disabled={busy}>
+        {busy ? "Retrying…" : "Retry failed tasks"}
+      </button>
+      {message && <span style={{ marginLeft: 10, color: "#555" }}>{message}</span>}
+    </div>
+  );
+}
+
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
@@ -528,6 +565,7 @@ export default function JobDetail() {
         <div style={{ marginTop: 4, fontSize: "0.8rem", color: "#999" }}>
           {jobId}
         </div>
+        <RetryJobButton jobId={jobId} />
       </div>
 
       <FailureBanner

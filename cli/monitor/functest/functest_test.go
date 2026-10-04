@@ -459,6 +459,75 @@ func TestOrphanRequeue(t *testing.T) {
 	checkStatus(aliveTask.TaskID, "claimed") // alive worker's task must not be touched
 }
 
+// TestReviveJobSummary verifies that a terminal JobSummary whose tasks have
+// been put back to pending (a job retry) is recomputed to pending with its
+// expiry extended, and that a summary that is still correctly terminal stays so.
+func TestReviveJobSummary(t *testing.T) {
+	startFirestoreEmulator(t)
+	ctx := context.Background()
+	fs := newFirestoreClient(t, ctx)
+	clock := scheduler.NewFakeClock(time.Now().UTC())
+	poolID := "pool-" + randomID()
+
+	summaries := monitor.NewFirestoreJobSummaryStore(fs)
+	tasks := monitor.NewFirestoreTaskStore(fs, nil)
+	m, _ := newMonitorWithStores(
+		clock,
+		monitor.NewFirestoreWorkPoolStore(fs),
+		monitor.NewFirestoreBatchRequestStore(fs),
+		monitor.NewFirestoreWorkerStore(fs),
+		tasks,
+	)
+	m.SetJobSummaryStore(summaries)
+
+	seed := func(taskStatus string) string {
+		jobID := "job-" + randomID()
+		writeTask(t, ctx, fs, &fsTaskDoc{
+			TaskID: "task-" + randomID(), JobID: jobID, WorkpoolID: poolID, Status: taskStatus,
+		})
+		if err := summaries.Create(ctx, &monitor.JobSummary{
+			JobID: jobID, WorkpoolID: poolID, State: monitor.JobStatusError,
+			Expiry: time.Now().Add(time.Hour),
+		}); err != nil {
+			t.Fatalf("Create JobSummary: %v", err)
+		}
+		return jobID
+	}
+	state := func(jobID string) monitor.JobSummary {
+		got, err := summaries.Get(ctx, jobID)
+		if err != nil || got == nil {
+			t.Fatalf("Get JobSummary %s: %v (%v)", jobID, got, err)
+		}
+		return *got
+	}
+
+	retried := seed("pending")
+	if err := m.ReviveJobSummary(ctx, retried); err != nil {
+		t.Fatalf("ReviveJobSummary: %v", err)
+	}
+	got := state(retried)
+	if got.State != monitor.JobStatusPending {
+		t.Errorf("retried job: want state pending, got %s", got.State)
+	}
+	if !got.Expiry.After(time.Now().Add(24 * time.Hour)) {
+		t.Errorf("retried job: expiry not extended: %v", got.Expiry)
+	}
+
+	// Tasks still errored: recomputing leaves it terminal.
+	unchanged := seed("error")
+	if err := m.ReviveJobSummary(ctx, unchanged); err != nil {
+		t.Fatalf("ReviveJobSummary: %v", err)
+	}
+	if got := state(unchanged); got.State != monitor.JobStatusError {
+		t.Errorf("unchanged job: want state error, got %s", got.State)
+	}
+
+	// A job with no summary is a no-op.
+	if err := m.ReviveJobSummary(ctx, "no-such-job"); err != nil {
+		t.Errorf("missing summary: want no error, got %v", err)
+	}
+}
+
 // TestJobSummaryPollPublishesTerminationEvent verifies that RunJobSummaryPoll
 // updates a JobSummary to the correct terminal status and publishes a
 // job_terminated event exactly once.

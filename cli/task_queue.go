@@ -241,8 +241,26 @@ type Task struct {
 	FailureReason           string           `firestore:"failure_reason" json:"failure_reason,omitempty"`
 	ExitCode                int              `firestore:"exit_code" json:"exit_code"`
 	ResourceUsage           *ResourceUsage   `firestore:"resource_usage" json:"resource_usage,omitempty"`
+	// FoundPriorResult is true only when the worker adopted an existing
+	// task_summary.json (exit_code == 0) at ResultPath instead of running the task.
+	FoundPriorResult bool `firestore:"found_prior_result" json:"found_prior_result,omitempty"`
 	LastUpdated             time.Time        `firestore:"last_updated" json:"last_updated"`
 	Expiry                  time.Time        `firestore:"expiry" json:"expiry"`
+}
+
+// Names of the summary files written under a job's / task's ResultPath.
+const (
+	JobSummaryFile  = "job_summary.json"
+	TaskSummaryFile = "task_summary.json"
+)
+
+// TaskSummary is the JSON document the worker writes to
+// <Task.ResultPath>/task_summary.json as the last upload of a completed run.
+// ExitCode == 0 means the task completed successfully; the worker consults it
+// to avoid re-running a task whose result already exists.
+type TaskSummary struct {
+	ExitCode   int       `json:"exit_code"`
+	FinishedAt time.Time `json:"finished_at"`
 }
 
 type TaskQueue interface {
@@ -262,6 +280,10 @@ type TaskQueue interface {
 	// RecordResourceUsage persists a ResourceUsage summary. Best-effort: callers
 	// should log but not fail on error.
 	RecordResourceUsage(ctx context.Context, taskID string, ru *ResourceUsage) error
+	// RecordPriorResultSuccess moves a claimed task directly to success and
+	// sets FoundPriorResult, for a task whose task_summary.json already
+	// reports exit_code 0.
+	RecordPriorResultSuccess(ctx context.Context, taskID string) error
 }
 
 type FirestoreTaskQueue struct {
@@ -506,6 +528,34 @@ func (q *FirestoreTaskQueue) RecordResourceUsage(ctx context.Context, taskID str
 		{Path: "resource_usage", Value: ru},
 	})
 	return err
+}
+
+// RecordPriorResultSuccess marks a claimed task as successful without having
+// run it, because a previous run's task_summary.json (exit_code 0) was found at
+// its ResultPath.
+func (q *FirestoreTaskQueue) RecordPriorResultSuccess(ctx context.Context, taskID string) error {
+	var jobID string
+	err := q.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		doc, err := tx.Get(q.taskDoc(taskID))
+		if err != nil {
+			return err
+		}
+		var t Task
+		if err := doc.DataTo(&t); err != nil {
+			return err
+		}
+		jobID = t.JobID
+		return tx.Update(q.taskDoc(taskID), []firestore.Update{
+			{Path: "status", Value: StatusSuccess},
+			{Path: "found_prior_result", Value: true},
+			{Path: "owning_worker_id", Value: ""},
+			{Path: "last_updated", Value: time.Now()},
+		})
+	})
+	if err != nil {
+		return err
+	}
+	return q.publisher.PublishTaskStateUpdate(ctx, taskID, jobID, StatusClaimed, StatusSuccess)
 }
 
 // RecordFailed marks a task as failed due to an infrastructure or system error.
