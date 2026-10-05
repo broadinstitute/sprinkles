@@ -803,12 +803,6 @@ function WorkPoolPropertiesPanel({
       <DetailRow label="root dir" value={detail.root_dir || dash} />
       <DetailRow label="provision mode" value={detail.provision_mode || dash} />
 
-      <ProvisioningSection
-        workpoolId={workpoolId}
-        detail={detail}
-        onWorkpoolUpdated={onWorkpoolUpdated}
-      />
-
       {detail.resources?.length > 0 && (
         <>
           <SectionHeader>Resources</SectionHeader>
@@ -848,6 +842,12 @@ function WorkPoolPropertiesPanel({
           ))}
         </>
       )}
+
+      <ProvisioningSection
+        workpoolId={workpoolId}
+        detail={detail}
+        onWorkpoolUpdated={onWorkpoolUpdated}
+      />
     </div>
   );
 }
