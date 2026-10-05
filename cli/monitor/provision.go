@@ -69,10 +69,17 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 	pool := ws.Pool
 	now := a.clock.Now()
 
-	pendingCount, err := a.tasks.CountPending(ctx, pool.WorkpoolID)
+	taskCounts, err := a.tasks.CountByWorkpool(ctx, pool.WorkpoolID)
 	if err != nil {
-		return fmt.Errorf("count pending tasks: %w", err)
+		return fmt.Errorf("count tasks: %w", err)
 	}
+	// Demand is every task that needs a worker: pending tasks waiting for one,
+	// plus claimed/running/writing tasks that are occupying one.
+	pendingCount := taskCounts[string(TaskStatusPending)]
+	demand := pendingCount +
+		taskCounts[string(TaskStatusClaimed)] +
+		taskCounts[string(TaskStatusRunning)] +
+		taskCounts[string(TaskStatusWriting)]
 
 	// Count VMs already requested (pending or started) rather than live workers.
 	// Workers take time to start, so counting heartbeats would trigger double-provisioning
@@ -88,10 +95,10 @@ func (a *Monitor) runProvisioningPollForWorkpool(ctx context.Context, ws *WorkPo
 		requestedCount += b.ExpectedVMCount
 	}
 
-	target := min(pool.MaxWorkerCount, pendingCount)
+	target := min(pool.MaxWorkerCount, demand)
 	needed := max(0, target-requestedCount)
 	if needed == 0 {
-		a.vlogf("provisioning poll: %d pending tasks in pool %s, but %d already requested, so nothing more needed", (pendingCount), pool.WorkpoolID, requestedCount)
+		a.vlogf("provisioning poll: %d pending tasks (%d total demand) in pool %s, but %d already requested, so nothing more needed", pendingCount, demand, pool.WorkpoolID, requestedCount)
 		return nil
 	}
 
