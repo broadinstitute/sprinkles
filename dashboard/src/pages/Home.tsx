@@ -44,7 +44,10 @@ export default function Home() {
     () => jobs.filter((j) => !TERMINAL_JOB_STATES.has(j.state)).length,
     [jobs],
   );
-  const activePools = workpools?.filter((p) => p.state !== "idle").length;
+  const activePools = workpools?.filter(
+    (p) => p.state !== "idle" && p.state !== "halted",
+  ).length;
+  const haltedPools = workpools?.filter((p) => p.state === "halted").length;
 
   return (
     <>
@@ -66,6 +69,16 @@ export default function Home() {
             <div className="home-card-label">Work Pools</div>
             <div className="home-card-value">{activePools ?? "—"}</div>
             <div className="home-card-caption">active workpools</div>
+            {haltedPools !== undefined && (
+              <div
+                className={
+                  "home-card-caption" +
+                  (haltedPools > 0 ? " home-card-caption-alert" : "")
+                }
+              >
+                {haltedPools} halted
+              </div>
+            )}
           </Link>
           <Link to="/errors" className="home-card home-card-link">
             Error Log →
@@ -190,6 +203,11 @@ const styles = `
     font: 400 12px 'Open Sans', sans-serif;
     color: var(--bcl-gray);
     margin-top: 4px;
+  }
+
+  .home-card-caption-alert {
+    color: #c62828;
+    font-weight: 600;
   }
 
   .home-card-link {
