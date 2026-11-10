@@ -4,9 +4,15 @@ No way to terminate a workpool completely (Need a "kill" workpool switch)
 
 Job page is still awkward. Something like "show active jobs and jobs which recently completed. Recent could be the last 20 jobs, or last hour" would be a better default
 
+The re-try job thing is a nuisance in development. Maybe only enable for prod runs? 
+
+finding job which is re-tryable is not checking to see if job is visible.
+
 Need a "retry" button the UI for re-running failed/complete with error tasks. (And corresponding API endpoint) (may have been done? need to check)
 
 Add flag to control streaming of logs. (Check on firestore costs)
+
+Would be nice to have a "delete" job rather than hide. (Should only work on jobs in a terminal state)
 
 ## Low priority
 
