@@ -57,8 +57,8 @@ that a worker VM downloading the extra bytes at boot costs nothing material.
 - Provisioned on demand by the GCP Batch API using a stock VM image (no
   custom image).
 - Each Batch job's task group runs two runnables per VM:
-  1. a throwaway `cloudsdktool/cloud-sdk:slim` container that
-     `gcloud storage cp`s the `sprinkles` binary from
+  1. a script runnable that runs
+     `gcloud storage cp` on the `batch-debian` host to copy the `sprinkles` binary from
      `SprinklesWorkerGCSPath` onto the VM's `RootDir`;
   2. a script runnable that `chmod +x`s it and execs
      `sprinkles worker ...` **directly on the VM host** (not inside a

@@ -18,8 +18,8 @@
    (preemptible first, subject to `MaxPreemptibleWorkerAttempts`), and
    calls the GCP Batch API to create the underlying VM job.
 5. GCP Batch provisions a VM. Its first runnable pulls the `sprinkles`
-   binary from GCS (`SprinklesWorkerGCSPath`) via a throwaway
-   `cloud-sdk:slim` container; its second runnable `chmod +x`s it and execs
+   binary from GCS (`SprinklesWorkerGCSPath`) via a script
+   runnable running `gcloud storage cp` on the `batch-debian` host; its second runnable `chmod +x`s it and execs
    `sprinkles worker ...` directly on the VM host.
 6. The **worker** (`worker.go`) registers a `Workers` document, starts a
    1-minute heartbeat goroutine, then loops:

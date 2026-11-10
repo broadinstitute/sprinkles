@@ -21,8 +21,6 @@ const (
 	labelWorkpool = "sprinkles-workpool"
 
 	pubsubNotificationTopic = "batch-api-notifications"
-
-	cloudSDKImage = "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
 )
 
 // GCPBatchAPIClient implements BatchAPIClient using the GCP Batch API and
@@ -339,15 +337,14 @@ func (c *GCPBatchAPIClient) CreateJob(ctx context.Context, spec *WorkerJobSpec) 
 					Volumes: volumes,
 					Runnables: []*batch.Runnable{
 						{
-							// Download the worker binary from GCS.
-							Container: &batch.Container{
-								ImageUri: cloudSDKImage,
-								Commands: []string{
-									"gcloud", "storage", "cp",
-									spec.SprinklesWorkerGCSPath,
-									spec.RootDir + "/sprinkles",
-								},
-								Volumes: []string{spec.RootDir + ":" + spec.RootDir},
+							// Download the worker binary from GCS. Runs as a script directly
+							// on the batch-debian host (which ships gcloud) rather than in
+							// the cloud-sdk container.
+							Script: &batch.Script{
+								Text: fmt.Sprintf(
+									"mkdir -p %s && gcloud storage cp %s %s/sprinkles",
+									spec.RootDir, spec.SprinklesWorkerGCSPath, spec.RootDir,
+								),
 							},
 						},
 						{
