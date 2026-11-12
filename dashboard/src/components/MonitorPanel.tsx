@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client";
-import type { MonitorPollerStatus, MonitorStatus } from "../types";
+import type {
+  MonitorFirestoreCall,
+  MonitorPollerStatus,
+  MonitorStatus,
+} from "../types";
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -90,6 +94,135 @@ const HEALTH_LABEL: Record<PollerHealth, string> = {
   failing: "failing",
   stale: "stale",
 };
+
+const READ_OPS = new Set(["get", "query", "aggregate", "listen"]);
+const WRITE_OPS = new Set(["write", "delete"]);
+
+interface FirestorePollerRow {
+  poller: string;
+  calls: number;
+  docsRead: number;
+  docsWritten: number;
+  /** Per (collection, op) detail, busiest first. */
+  detail: MonitorFirestoreCall[];
+}
+
+/** Groups the per-(poller, collection, op) buckets into one row per poller,
+ * busiest (most calls) first. */
+function groupFirestoreCalls(
+  calls: MonitorFirestoreCall[],
+): FirestorePollerRow[] {
+  const byPoller = new Map<string, FirestorePollerRow>();
+  for (const c of calls) {
+    let row = byPoller.get(c.poller);
+    if (!row) {
+      row = {
+        poller: c.poller,
+        calls: 0,
+        docsRead: 0,
+        docsWritten: 0,
+        detail: [],
+      };
+      byPoller.set(c.poller, row);
+    }
+    row.calls += c.calls;
+    if (READ_OPS.has(c.op)) row.docsRead += c.docs;
+    if (WRITE_OPS.has(c.op)) row.docsWritten += c.docs;
+    row.detail.push(c);
+  }
+  const rows = [...byPoller.values()];
+  for (const r of rows) r.detail.sort((a, b) => b.calls - a.calls);
+  return rows.sort((a, b) => b.calls - a.calls);
+}
+
+function FirestoreCallsSection({
+  calls,
+  since,
+  now,
+}: {
+  calls: MonitorFirestoreCall[];
+  since: string | null | undefined;
+  now: number;
+}) {
+  const rows = groupFirestoreCalls(calls);
+  const total = rows.reduce(
+    (t, r) => ({
+      calls: t.calls + r.calls,
+      docsRead: t.docsRead + r.docsRead,
+      docsWritten: t.docsWritten + r.docsWritten,
+    }),
+    { calls: 0, docsRead: 0, docsWritten: 0 },
+  );
+  const hours = since
+    ? Math.max((now - new Date(since).getTime()) / 3_600_000, 1 / 60)
+    : 0;
+  const perHour = hours > 0 ? Math.round(total.calls / hours) : null;
+
+  return (
+    <div className="mon-fs">
+      <div className="mon-header">
+        <span className="mon-title">Firestore calls</span>
+        <span className="mon-chip">
+          {total.calls.toLocaleString()} calls
+          {perHour !== null && ` · ~${perHour.toLocaleString()}/hour`}
+        </span>
+        <span className="mon-muted mon-fs-since">
+          monitor only, since {since ? formatAgo(since, now) : "start"}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <div className="mon-empty">No Firestore calls recorded yet.</div>
+      ) : (
+        <table className="mon-table">
+          <thead>
+            <tr>
+              <th className="mon-th">Poller</th>
+              <th className="mon-th mon-th-num">Calls</th>
+              <th
+                className="mon-th mon-th-num"
+                title="Documents read: what Firestore bills for reads"
+              >
+                Docs read
+              </th>
+              <th className="mon-th mon-th-num">Docs written</th>
+              <th className="mon-th">By collection &amp; op</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.poller} className="mon-tr">
+                <td className="mon-td mon-name">
+                  {r.poller || "(unattributed)"}
+                </td>
+                <td className="mon-td mon-num">{r.calls.toLocaleString()}</td>
+                <td className="mon-td mon-num mon-muted">
+                  {r.docsRead.toLocaleString()}
+                </td>
+                <td className="mon-td mon-num mon-muted">
+                  {r.docsWritten.toLocaleString()}
+                </td>
+                <td className="mon-td">
+                  {r.detail.map((d) => (
+                    <span
+                      key={`${d.collection}|${d.op}`}
+                      className="mon-counter"
+                      title={`${d.calls} calls, ${d.docs} documents`}
+                    >
+                      {d.collection || "—"} {d.op} <strong>{d.calls}</strong>
+                      {d.docs > 0 && d.op !== "write" && d.op !== "delete" && (
+                        <span className="mon-muted"> ({d.docs} docs)</span>
+                      )}
+                    </span>
+                  ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 export default function MonitorPanel() {
   const { status, fetchedAt: now, nextRefreshAt } = useMonitorStatus();
@@ -203,6 +336,13 @@ export default function MonitorPanel() {
             </tbody>
           </table>
         )}
+        {status?.available && (
+          <FirestoreCallsSection
+            calls={status.firestore_calls ?? []}
+            since={status.firestore_calls_since}
+            now={now}
+          />
+        )}
         <div className="mon-refresh">
           <RefreshCountdown nextRefreshAt={nextRefreshAt} />
         </div>
@@ -244,6 +384,16 @@ const styles = `
 
   .mon-chip-green { background: #F1F8EA; color: #4d7a1f; }
   .mon-chip-red   { background: #FBF0EE; color: var(--bcl-negative); }
+
+  .mon-fs {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--bcl-border);
+  }
+
+  .mon-fs-since {
+    font: 400 12px 'Open Sans', sans-serif;
+  }
 
   .mon-refresh {
     margin-top: 10px;

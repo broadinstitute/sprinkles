@@ -37,6 +37,8 @@ type PollerStats struct {
 	startedAt time.Time
 	order     []string
 	pollers   map[string]*pollerState
+	// firestore counts the monitor's Firestore calls; nil if not enabled.
+	firestore *FirestoreCallStats
 }
 
 type pollerState struct {
@@ -71,6 +73,15 @@ type PollerSnapshot struct {
 	LastError           string
 	LastErrorAt         time.Time
 	Counters            map[string]int64
+}
+
+// FirestoreCalls returns the monitor's Firestore call counters, or nil if
+// they aren't enabled.
+func (s *PollerStats) FirestoreCalls() *FirestoreCallStats {
+	if s == nil {
+		return nil
+	}
+	return s.firestore
 }
 
 // PollerStatsSnapshot is a point-in-time copy of all pollers' stats, in

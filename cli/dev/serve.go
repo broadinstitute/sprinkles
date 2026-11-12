@@ -79,7 +79,7 @@ func runServe(c *cli.Context) error {
 		// No --linger here: unlike "dev monitor", a server shouldn't shut itself
 		// down when the queue goes quiet.
 		var stopMonitor func()
-		m, stopMonitor, err = newMonitor(ctx, project, db, fsClient, psClient, c.Bool("verbose"), 0)
+		m, stopMonitor, err = newMonitor(ctx, project, db, psClient, c.Bool("verbose"), 0)
 		if err != nil {
 			return err
 		}

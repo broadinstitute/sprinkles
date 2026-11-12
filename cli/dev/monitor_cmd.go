@@ -9,7 +9,6 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub/v2"
 	pubsubpb "cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	"cloud.google.com/go/storage"
@@ -32,11 +31,18 @@ import (
 func newMonitor(
 	ctx context.Context,
 	project, db string,
-	fsClient *firestore.Client,
 	psClient *pubsub.Client,
 	verbose bool,
 	linger time.Duration,
 ) (*monitor.Monitor, func(), error) {
+	// The monitor gets its own Firestore client, with call counting enabled,
+	// so that only the monitor's traffic (not the dashboard's) is counted.
+	callStats := monitor.NewFirestoreCallStats()
+	fsClient, closeFSConn, err := callStats.NewClient(ctx, project, db)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating monitor firestore client: %w", err)
+	}
+
 	pools := monitor.NewFirestoreWorkPoolStore(fsClient)
 	batches := monitor.NewFirestoreBatchRequestStore(fsClient)
 	workers := monitor.NewFirestoreWorkerStore(fsClient)
@@ -88,6 +94,7 @@ func newMonitor(
 	eventStore := monitor.NewFirestoreEventStore(fsClient)
 
 	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver, db)
+	m.SetFirestoreCallStats(callStats)
 	m.SetVerbose(verbose)
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)
@@ -106,6 +113,8 @@ func newMonitor(
 	stop := func() {
 		ep.Stop()
 		gcsClient.Close()
+		fsClient.Close()
+		closeFSConn()
 	}
 	return m, stop, nil
 }
@@ -121,19 +130,13 @@ func runDevMonitor(c *cli.Context) error {
 	defer stop()
 
 	log.Printf("Connecting to project %s, database %s", project, db)
-	fsClient, err := firestore.NewClientWithDatabase(ctx, project, db)
-	if err != nil {
-		return fmt.Errorf("creating firestore client: %w", err)
-	}
-	defer fsClient.Close()
-
 	psClient, err := pubsub.NewClient(ctx, project)
 	if err != nil {
 		return fmt.Errorf("creating pubsub client: %w", err)
 	}
 	defer psClient.Close()
 
-	m, stopMonitor, err := newMonitor(ctx, project, db, fsClient, psClient,
+	m, stopMonitor, err := newMonitor(ctx, project, db, psClient,
 		c.Bool("verbose"), time.Duration(c.Int("linger"))*time.Minute)
 	if err != nil {
 		return err

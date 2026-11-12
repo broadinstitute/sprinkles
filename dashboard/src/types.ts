@@ -206,6 +206,22 @@ export interface MonitorStatus {
   available: boolean;
   started_at: string | null;
   pollers: MonitorPollerStatus[];
+  /** The monitor's own Firestore traffic (not the dashboard's), per poller,
+   * collection and op, since `firestore_calls_since`. */
+  firestore_calls?: MonitorFirestoreCall[];
+  firestore_calls_since?: string | null;
+}
+
+export interface MonitorFirestoreCall {
+  /** Poller (or other monitor activity) that made the calls; "" if unlabelled. */
+  poller: string;
+  collection: string;
+  /** get | query | aggregate | write | delete | listen | transaction | other */
+  op: string;
+  /** Number of RPCs. */
+  calls: number;
+  /** Documents read (billed reads) or written/deleted. */
+  docs: number;
 }
 
 export interface WorkPoolSummaryHistoryEntry {

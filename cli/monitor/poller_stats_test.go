@@ -76,7 +76,7 @@ func TestPollerStats_TaskRecoveryCounters(t *testing.T) {
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusRunning, OwningWorkerID: "w1"})
 	w.Tasks.Add(&Task{TaskID: "t2", WorkpoolID: "pool-1", Status: TaskStatusClaimed, OwningWorkerID: "w1"})
 
-	w.A.runPoller(PollerTaskRecovery, func() error { return w.A.runRequeueOrphanedTasks(context.Background()) })
+	w.A.runPoller(context.Background(), PollerTaskRecovery, w.A.runRequeueOrphanedTasks)
 
 	var got PollerSnapshot
 	for _, p := range w.A.PollerStats().Snapshot().Pollers {

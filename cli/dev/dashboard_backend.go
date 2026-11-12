@@ -1928,6 +1928,22 @@ type monitorStatusResponse struct {
 	Available bool                  `json:"available"`
 	StartedAt *time.Time            `json:"started_at"`
 	Pollers   []monitorPollerStatus `json:"pollers"`
+	// FirestoreCalls counts the monitor's own Firestore traffic (the
+	// dashboard's is excluded), grouped by poller, collection and op, since
+	// FirestoreCallsSince.
+	FirestoreCalls      []monitorFirestoreCall `json:"firestore_calls"`
+	FirestoreCallsSince *time.Time             `json:"firestore_calls_since"`
+}
+
+// monitorFirestoreCall is one bucket of monitor.FirestoreCallCount. Op is one
+// of get, query, aggregate, write, delete, listen, transaction or other.
+// Calls is RPCs; Docs is documents read (billed reads) or written/deleted.
+type monitorFirestoreCall struct {
+	Poller     string `json:"poller"`
+	Collection string `json:"collection"`
+	Op         string `json:"op"`
+	Calls      int64  `json:"calls"`
+	Docs       int64  `json:"docs"`
 }
 
 func timePtr(t time.Time) *time.Time {
@@ -1941,7 +1957,10 @@ func timePtr(t time.Time) *time.Time {
 // have been doing, from the monitor's in-memory PollerStats (so it resets
 // when the process restarts).
 func (s *dashboardServer) handleGetMonitorStatus(w http.ResponseWriter, r *http.Request) {
-	resp := monitorStatusResponse{Pollers: []monitorPollerStatus{}}
+	resp := monitorStatusResponse{
+		Pollers:        []monitorPollerStatus{},
+		FirestoreCalls: []monitorFirestoreCall{},
+	}
 	if s.pollerStats != nil {
 		snap := s.pollerStats.Snapshot()
 		resp.Available = true
@@ -1962,6 +1981,14 @@ func (s *dashboardServer) handleGetMonitorStatus(w http.ResponseWriter, r *http.
 				LastError:           p.LastError,
 				LastErrorAt:         timePtr(p.LastErrorAt),
 				Counters:            p.Counters,
+			})
+		}
+	}
+	if counts, since := s.pollerStats.FirestoreCalls().Snapshot(); len(counts) > 0 || !since.IsZero() {
+		resp.FirestoreCallsSince = timePtr(since)
+		for _, c := range counts {
+			resp.FirestoreCalls = append(resp.FirestoreCalls, monitorFirestoreCall{
+				Poller: c.Poller, Collection: c.Collection, Op: c.Op, Calls: c.Calls, Docs: c.Docs,
 			})
 		}
 	}

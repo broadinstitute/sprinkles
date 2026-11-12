@@ -117,11 +117,19 @@ func (a *Monitor) PollerStats() *PollerStats { return a.stats }
 
 // runPoller runs one pass of the named poller, recording it in the poller
 // stats and the error log if it fails.
-func (a *Monitor) runPoller(name string, fn func() error) {
-	if err := a.stats.Run(name, a.trigger, fn); err != nil {
+func (a *Monitor) runPoller(ctx context.Context, name string, fn func(context.Context) error) {
+	// Label the context so Firestore calls made by this poller are
+	// attributed to it in FirestoreCallStats.
+	ctx = WithFirestoreLabel(ctx, name)
+	if err := a.stats.Run(name, a.trigger, func() error { return fn(ctx) }); err != nil {
 		a.errorLog.Add("%s: %v", name, err)
 	}
 }
+
+// SetFirestoreCallStats attaches the counters for the monitor's Firestore
+// calls (see FirestoreCallStats.NewClient) so they can be reported
+// alongside the poller stats.
+func (a *Monitor) SetFirestoreCallStats(s *FirestoreCallStats) { a.stats.firestore = s }
 
 // SetVerbose enables or disables verbose poll logging.
 func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
@@ -247,28 +255,28 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	// falls back to max_time_between_polls if no notification arrives.
 	notifyClusterReconciler := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Reconciling our records against google's")
-		a.runPoller(PollerClusterReconciler, func() error { return a.runClusterReconciler(ctx) })
+		a.runPoller(ctx, PollerClusterReconciler, a.runClusterReconciler)
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
 
 	// Provisioner: Responsible for requesting VMs for pending tasks. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for workpools which need new workers")
-		a.runPoller(PollerProvisioning, func() error { return a.runProvisioningPoll(ctx) })
+		a.runPoller(ctx, PollerProvisioning, a.runProvisioningPoll)
 		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
 
 	// Task recovery: Fixed 30-second interval; no notification trigger.
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking for ophaned jobs")
-		a.runPoller(PollerTaskRecovery, func() error { return a.runRequeueOrphanedTasks(ctx) })
+		a.runPoller(ctx, PollerTaskRecovery, a.runRequeueOrphanedTasks)
 		a.vlogf("Completed: Checking for ophaned jobs")
 	})
 
 	// Batch startup monitor: Triggered by PubSub notifications for pending batches; and fallback timer
 	notifyBatchStartupMonitor := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Started: Checking to see if workers successfully starting")
-		a.runPoller(PollerBatchStartup, func() error { return a.runBatchStartupMonitor(ctx) })
+		a.runPoller(ctx, PollerBatchStartup, a.runBatchStartupMonitor)
 		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
 
@@ -276,7 +284,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	if a.expiry != nil {
 		sched.Add(expiryCleanerInterval, expiryCleanerInterval, func() {
 			a.vlogf("Deleting expired objects from firestore...")
-			a.runPoller(PollerExpiryCleaner, func() error { return a.runExpiryCleaner(ctx) })
+			a.runPoller(ctx, PollerExpiryCleaner, a.runExpiryCleaner)
 			a.vlogf("Deleting expired objects from firestore complete")
 		})
 	}
@@ -286,7 +294,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	var notifyJobSummary func()
 	notifyJobSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Computing job summaries")
-		a.runPoller(PollerJobSummary, func() error { return a.runJobSummaryPoll(ctx) })
+		a.runPoller(ctx, PollerJobSummary, a.runJobSummaryPoll)
 		a.vlogf("Completed: Computing job summaries")
 	})
 
@@ -295,7 +303,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	var notifyWorkPoolSummary func()
 	notifyWorkPoolSummary = sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
 		a.vlogf("Starting: Compute workpool summaries")
-		a.runPoller(PollerWorkPoolSummary, func() error { return a.runWorkPoolSummaryPoll(ctx) })
+		a.runPoller(ctx, PollerWorkPoolSummary, a.runWorkPoolSummaryPoll)
 		a.vlogf("Completed: Compute workpool summaries")
 	})
 
@@ -321,7 +329,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 						notifyProvisioning()
 					}
 					if n.EventType == "job_created" && n.JobID != "" && a.jobSummaries != nil {
-						if err := a.reviveJobSummary(ctx, n.JobID); err != nil {
+						if err := a.reviveJobSummary(WithFirestoreLabel(ctx, "job event: revive job summary"), n.JobID); err != nil {
 							a.errorLog.Add("reviving job summary for job %s: %v", n.JobID, err)
 						}
 					}
@@ -349,7 +357,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 					return
 				}
 				a.vlogf("pubsub: received notification for batch %s", n.BatchID)
-				a.routeNotification(ctx, n.BatchID, notifyClusterReconciler, notifyBatchStartupMonitor)
+				a.routeNotification(WithFirestoreLabel(ctx, "batch notification routing"), n.BatchID, notifyClusterReconciler, notifyBatchStartupMonitor)
 				if notifyWorkPoolSummary != nil {
 					notifyWorkPoolSummary()
 				}
