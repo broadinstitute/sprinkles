@@ -30,14 +30,25 @@ const (
 	CollectionMonitorLease = leaseCollection
 
 	// defaultLeaseTTL is how long a lease lasts without being renewed, so how
-	// long a crashed monitor blocks its replacement. The holder renews every
-	// ttl/3 and stops itself if it hasn't managed to renew for ttl*2/3, so it
-	// always stops before the lease can be taken over.
-	defaultLeaseTTL = 60 * time.Second
+	// long a crashed monitor blocks its replacement (a clean shutdown releases
+	// the lease and blocks nothing). The holder renews every ttl/3 (5 minutes
+	// for the default) and stops itself if it hasn't managed to renew for
+	// ttl*2/3 (10 minutes), so it always stops before the lease can be taken
+	// over.
+	defaultLeaseTTL = 15 * time.Minute
+
+	// leaseFailureRetryInterval is how soon a failed renewal is retried. The
+	// normal interval is long, so without this a single blip would cost a whole
+	// interval of the margin; this gives several attempts before giving up.
+	leaseFailureRetryInterval = 30 * time.Second
+
+	// leaseCallTimeout bounds one renewal call (or the normal interval if
+	// that is shorter), so a hung call can't use up the margin.
+	leaseCallTimeout = 30 * time.Second
 
 	// defaultLeaseRetryInterval is how often AcquireLease retries while
 	// another holder's lease is still live.
-	defaultLeaseRetryInterval = 5 * time.Second
+	defaultLeaseRetryInterval = 30 * time.Second
 )
 
 // ErrLeaseLost means the lease is no longer ours: another monitor took it.
@@ -245,26 +256,31 @@ func (a *Monitor) ReleaseLease(ctx context.Context) {
 	}
 }
 
-// runLeaseRenewal renews the lease every ttl/3 until ctx is done. It calls
-// fatal and returns if the lease is lost, or if it hasn't been renewed for
-// ttl*2/3 (after which we can no longer be sure nobody else could take it).
+// runLeaseRenewal renews the lease every ttl/3 until ctx is done, retrying
+// failures every leaseFailureRetryInterval. It calls fatal and returns if the
+// lease is lost, or if it hasn't been renewed for ttl*2/3 (after which we can
+// no longer be sure nobody else could take it).
 func (a *Monitor) runLeaseRenewal(ctx context.Context, fatal func(error)) {
 	l := a.lease
 	interval := l.ttl / 3
+	callTimeout := min(interval, leaseCallTimeout)
+	retry := min(interval, leaseFailureRetryInterval)
 	lastOK := a.clock.Now()
+	wait := interval
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-a.clock.After(interval):
+		case <-a.clock.After(wait):
 		}
 
-		callCtx, cancel := context.WithTimeout(WithFirestoreLabel(ctx, "monitor lease"), interval)
+		callCtx, cancel := context.WithTimeout(WithFirestoreLabel(ctx, "monitor lease"), callTimeout)
 		err := l.store.Renew(callCtx, l.claim.HolderID, a.clock.Now(), l.ttl)
 		cancel()
 		now := a.clock.Now()
 		if err == nil {
 			lastOK = now
+			wait = interval
 			continue
 		}
 		if ctx.Err() != nil {
@@ -276,6 +292,7 @@ func (a *Monitor) runLeaseRenewal(ctx context.Context, fatal func(error)) {
 			return
 		}
 		a.errorLog.Add("monitor lease: renewal failed: %v", err)
+		wait = retry
 		if now.Sub(lastOK) >= l.ttl-interval {
 			err = fmt.Errorf("could not renew the monitor lease for %s: %w", now.Sub(lastOK).Round(time.Second), err)
 			a.errorLog.Add("monitor lease: %v; stopping", err)

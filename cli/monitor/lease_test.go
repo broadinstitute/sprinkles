@@ -137,7 +137,7 @@ func TestAcquireLease_WaitsOutAnExpiredHolder(t *testing.T) {
 	store.give("crashed", w.Clock.Now().Add(30*time.Second))
 
 	var err error
-	advanceWhileWaiting(t, sc, 5*time.Second, func() { err = w.A.AcquireLease(context.Background()) })
+	advanceWhileWaiting(t, sc, w.A.lease.retryInterval, func() { err = w.A.AcquireLease(context.Background()) })
 
 	require.NoError(t, err)
 	id, _ := store.holderID()
@@ -151,7 +151,7 @@ func TestAcquireLease_RefusesWhileAnotherHolderIsAlive(t *testing.T) {
 	store.give("alive", w.Clock.Now().Add(24*time.Hour))
 
 	var err error
-	advanceWhileWaiting(t, sc, 5*time.Second, func() { err = w.A.AcquireLease(context.Background()) })
+	advanceWhileWaiting(t, sc, w.A.lease.retryInterval, func() { err = w.A.AcquireLease(context.Background()) })
 
 	var held *LeaseHeldError
 	require.ErrorAs(t, err, &held)
@@ -312,4 +312,44 @@ func TestRunMonitorLoop_ExitsWhenLeaseIsLost(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("monitor loop kept running after losing the lease")
 	}
+}
+
+func TestSetLease_DefaultsAreFifteenMinutesWithFiveMinuteRenewal(t *testing.T) {
+	w := newWorld()
+	w.A.SetLease(newFakeLeaseStore(), 0)
+	assert.Equal(t, 15*time.Minute, w.A.lease.ttl)
+	assert.Equal(t, 5*time.Minute, w.A.lease.ttl/3, "renewal interval")
+}
+
+// With the default 15 minute lease the normal renewal interval is long, so a
+// failed renewal is retried every 30s, and we only give up once the lease is
+// 10 minutes (ttl*2/3) past its last successful renewal.
+func TestLeaseRenewal_DefaultTTL_RetriesFailuresSoonerAndStopsAtTenMinutes(t *testing.T) {
+	store := newFakeLeaseStore()
+	w, sc := leaseWorld(store)
+	w.A.SetLease(store, 0)
+	require.NoError(t, w.A.AcquireLease(context.Background()))
+	start := w.Clock.Now()
+	store.renewErr = errors.New("firestore unavailable")
+	fatal := startRenewal(w, sc, context.Background())
+
+	step(t, store, sc, 5*time.Minute) // first renewal is due after the normal interval
+	var stoppedAt time.Duration
+loop:
+	for {
+		select {
+		case <-fatal:
+			stoppedAt = w.Clock.Now().Sub(start)
+			break loop
+		case <-sc.waiting:
+		case <-time.After(5 * time.Second):
+			t.Fatal("renewal loop stopped waiting without a fatal error")
+		}
+		step(t, store, sc, 30*time.Second) // later attempts come every 30s
+		if w.Clock.Now().Sub(start) > 11*time.Minute {
+			t.Fatal("kept retrying past the 10 minute margin")
+		}
+	}
+	assert.Equal(t, 10*time.Minute, stoppedAt)
+	assert.Greater(t, len(w.A.ErrorLog().Entries()), 3, "each failed attempt is logged")
 }
