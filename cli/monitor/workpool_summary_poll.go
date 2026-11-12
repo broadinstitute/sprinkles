@@ -13,10 +13,6 @@ import (
 // last poll and transitions any idle workpool with a new job to ok.
 func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 	// Collect workpool IDs that have received a new job since the last poll.
-	// TODO: This could be reorganized to make more efficient queries by:
-	// 1. fetch only "active" workpools (ie: only workpools which are not "idle")
-	// 2. add to that any workpools which are referenced by new job events
-	// That gives us a minimal list of pools which we can recompute from scratch
 	poolsWithNewJob := make(map[string]bool)
 	if a.events != nil {
 		events, err := a.events.ListJobCreatedSince(ctx, a.lastEventTime)
@@ -32,16 +28,29 @@ func (a *Monitor) runWorkPoolSummaryPoll(ctx context.Context) error {
 		}
 	}
 
-	pools, err := a.pools.ListAll(ctx)
+	// Recompute every pool that isn't idle, plus any idle pool that just
+	// received a job (which is what flips it to ok). Idle pools with no new
+	// job are skipped, so the cost doesn't grow with the number of pools
+	// that have ever existed.
+	activePools, err := a.listActivePools(ctx)
 	if err != nil {
 		return err
 	}
-
-	activePools := make([]*WorkPoolWithState, 0, len(pools))
-	for _, ws := range pools {
-		if ws.State.State != WorkPoolStatusIdle || poolsWithNewJob[ws.Pool.WorkpoolID] {
-			activePools = append(activePools, ws)
+	have := make(map[string]bool, len(activePools))
+	for _, ws := range activePools {
+		have[ws.Pool.WorkpoolID] = true
+	}
+	for id := range poolsWithNewJob {
+		if have[id] {
+			continue
 		}
+		ws, err := a.pools.Get(ctx, id)
+		if err != nil {
+			// e.g. the workpool has expired since the event was recorded.
+			log.Printf("workpool summary poll: load workpool %s for new job: %v", id, err)
+			continue
+		}
+		activePools = append(activePools, ws)
 	}
 
 	for _, ws := range activePools {
@@ -179,6 +188,9 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 			return err
 		}
 		a.stats.Add(PollerWorkPoolSummary, "state_transitions", 1)
+		// The set of idle pools just changed, so what the other pollers last
+		// learned about it is stale.
+		a.activePoolCount.Store(activePoolCountUnknown)
 	}
 
 	batchCounts := taskCountsFromMap(batchStateCounts)

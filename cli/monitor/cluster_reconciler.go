@@ -10,7 +10,7 @@ import (
 // Runs on PubSub notifications for started batches
 // or after max_time_between_polls. Makes GCP API calls for both VM list and Batch API status.
 func (a *Monitor) runClusterReconciler(ctx context.Context) error {
-	pools, err := a.pools.ListAll(ctx)
+	pools, err := a.listActivePools(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}

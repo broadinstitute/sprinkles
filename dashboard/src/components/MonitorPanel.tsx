@@ -70,7 +70,13 @@ function RefreshCountdown({ nextRefreshAt }: { nextRefreshAt: number | null }) {
 function pollerHealth(p: MonitorPollerStatus, now: number): PollerHealth {
   if (p.runs === 0 || !p.last_finished) return "starting";
   if (p.consecutive_failures > 0) return "failing";
-  const sinceLast = (now - new Date(p.last_finished).getTime()) / 1000;
+  // A poller that is skipping runs because every workpool is idle is alive,
+  // just idle, so count its last skip as activity.
+  const lastActive = Math.max(
+    new Date(p.last_finished).getTime(),
+    p.last_skipped ? new Date(p.last_skipped).getTime() : 0,
+  );
+  const sinceLast = (now - lastActive) / 1000;
   if (sinceLast > p.max_interval_seconds * STALE_FACTOR) return "stale";
   return "ok";
 }

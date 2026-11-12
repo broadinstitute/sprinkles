@@ -1906,20 +1906,23 @@ func (s *dashboardServer) handleLatestError(w http.ResponseWriter, r *http.Reque
 // ----- GET /api/v1/monitor/status -----
 
 type monitorPollerStatus struct {
-	Name                string           `json:"name"`
-	MaxIntervalSeconds  float64          `json:"max_interval_seconds"`
-	Runs                int64            `json:"runs"`
-	NotificationRuns    int64            `json:"notification_runs"`
-	TimerRuns           int64            `json:"timer_runs"`
-	Failures            int64            `json:"failures"`
-	ConsecutiveFailures int64            `json:"consecutive_failures"`
-	LastStarted         *time.Time       `json:"last_started"`
-	LastFinished        *time.Time       `json:"last_finished"`
-	LastSuccess         *time.Time       `json:"last_success"`
-	LastDurationMs      int64            `json:"last_duration_ms"`
-	LastError           string           `json:"last_error"`
-	LastErrorAt         *time.Time       `json:"last_error_at"`
-	Counters            map[string]int64 `json:"counters"`
+	Name                string     `json:"name"`
+	MaxIntervalSeconds  float64    `json:"max_interval_seconds"`
+	Runs                int64      `json:"runs"`
+	NotificationRuns    int64      `json:"notification_runs"`
+	TimerRuns           int64      `json:"timer_runs"`
+	Failures            int64      `json:"failures"`
+	ConsecutiveFailures int64      `json:"consecutive_failures"`
+	LastStarted         *time.Time `json:"last_started"`
+	LastFinished        *time.Time `json:"last_finished"`
+	LastSuccess         *time.Time `json:"last_success"`
+	LastDurationMs      int64      `json:"last_duration_ms"`
+	LastError           string     `json:"last_error"`
+	LastErrorAt         *time.Time `json:"last_error_at"`
+	// LastSkipped is when the poller last skipped a run because every
+	// workpool was idle; a poller that is only skipping is idle, not stalled.
+	LastSkipped *time.Time       `json:"last_skipped"`
+	Counters    map[string]int64 `json:"counters"`
 }
 
 type monitorStatusResponse struct {
@@ -1980,6 +1983,7 @@ func (s *dashboardServer) handleGetMonitorStatus(w http.ResponseWriter, r *http.
 				LastDurationMs:      p.LastDuration.Milliseconds(),
 				LastError:           p.LastError,
 				LastErrorAt:         timePtr(p.LastErrorAt),
+				LastSkipped:         timePtr(p.LastSkipped),
 				Counters:            p.Counters,
 			})
 		}

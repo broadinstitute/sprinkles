@@ -13,7 +13,7 @@ import (
 func TestProvision_NoPendingTasks_NoBatchCreated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	err := w.A.runProvisioningPoll(context.Background())
 	require.NoError(t, err)
@@ -25,7 +25,7 @@ func TestProvision_CreateError_RecordsIncidentAndHaltsAfterThreshold(t *testing.
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxConsecutiveFailedBatches = 2
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 3; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -54,7 +54,7 @@ func TestProvision_CopiesPoolLabelsOntoJobAndBatchRequest(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.Labels = []Label{{Name: "team", Value: "alice"}}
 	pool.MaxPreemptibleWorkerAttempts = 0 // force non-preemptible for a single batch
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 3; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -75,7 +75,7 @@ func TestProvision_CopiesPoolProjectIDOntoJobAndBatchRequest(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.ProjectID = "workload-project"
 	pool.MaxPreemptibleWorkerAttempts = 0 // force non-preemptible for a single batch
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 3; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -97,7 +97,7 @@ func TestProvision_NoPoolProjectID_LeavesProjectEmpty(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 0
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 3; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -114,7 +114,7 @@ func TestProvision_NoPoolProjectID_LeavesProjectEmpty(t *testing.T) {
 func TestProvision_DemandMetByRequestedVMs_NoBatchCreated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// 5 pending tasks, a started batch covering all 5 — workers still starting up.
 	for i := 0; i < 5; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
@@ -136,7 +136,7 @@ func TestProvision_CreatesBatchForDemand(t *testing.T) {
 	pool := defaultPool("pool-1")
 	// 0 preemptible budget → all non-preemptible
 	pool.MaxPreemptibleWorkerAttempts = 0
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 10; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -154,7 +154,7 @@ func TestProvision_CapsAtMaxWorkerCount(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.MaxWorkerCount = 50
 	pool.MaxPreemptibleWorkerAttempts = 0
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 200; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -171,7 +171,7 @@ func TestProvision_CapsAtMaxWorkersPerRequest(t *testing.T) {
 	pool.MaxWorkerCount = 200
 	pool.MaxWorkersPerRequest = 100
 	pool.MaxPreemptibleWorkerAttempts = 0
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 200; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -186,7 +186,7 @@ func TestProvision_FullPreemptibleBudget_AllPreemptible(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 200
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 20; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -202,7 +202,7 @@ func TestProvision_ExhaustedPreemptibleBudget_AllNonPreemptible(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 10
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// Simulate 10 zombie incidents (our proxy for preemption) recorded
 	// within the last hour.
 	for i := 0; i < 10; i++ {
@@ -229,7 +229,7 @@ func TestProvision_NoRecentZombies_TwoJobsBothGetFullPreemptibleBudget(t *testin
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 5
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	// Job 1: 5 tasks.
 	for i := 0; i < 5; i++ {
@@ -257,7 +257,7 @@ func TestProvision_ZombiesOutsideWindow_FullBudgetAvailable(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 5
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// 5 zombies recorded more than an hour ago should not count against
 	// the budget.
 	for i := 0; i < 5; i++ {
@@ -278,7 +278,7 @@ func TestProvision_NonZombieIncidents_DoNotConsumePreemptibleBudget(t *testing.T
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 5
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// Unrelated incidents (not zombies) recorded recently should not count
 	// against the preemptible budget.
 	for i := 0; i < 5; i++ {
@@ -300,7 +300,7 @@ func TestProvision_PartialPreemptibleBudget_SplitBatches(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.MaxPreemptibleWorkerAttempts = 5
 	pool.MaxWorkersPerRequest = 100
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	for i := 0; i < 20; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})
 	}
@@ -324,7 +324,7 @@ func TestProvision_PartialPreemptibleBudget_SplitBatches(t *testing.T) {
 func TestProvision_HaltedWorkpool_NoProvisioning(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusHalted})
 	for i := 0; i < 10; i++ {
 		w.Tasks.Add(&Task{TaskID: taskID(i), WorkpoolID: "pool-1", Status: TaskStatusPending})

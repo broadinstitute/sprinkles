@@ -155,6 +155,58 @@ func (s *FirestoreWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPoolWithSt
 	return result, nil
 }
 
+func (s *FirestoreWorkPoolStore) ListActive(ctx context.Context) ([]*WorkPoolWithState, error) {
+	iter := s.fs.Collection(workPoolSummaryCollection).
+		Where("state", "in", []string{
+			string(WorkPoolStatusOK), string(WorkPoolStatusUnhealthy), string(WorkPoolStatusHalted),
+		}).
+		Documents(ctx)
+	defer iter.Stop()
+
+	var summaries []*WorkPoolSummary
+	var refs []*firestore.DocumentRef
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		var summary WorkPoolSummary
+		if err := snap.DataTo(&summary); err != nil {
+			return nil, err
+		}
+		// The document ID is the workpool ID. (A summary created by
+		// SaveState alone, before the summary poll first runs, has no
+		// workpool_id field.)
+		summary.WorkpoolID = snap.Ref.ID
+		summaries = append(summaries, &summary)
+		refs = append(refs, s.fs.Collection(workpoolCollection).Doc(snap.Ref.ID))
+	}
+	if len(refs) == 0 {
+		return nil, nil
+	}
+
+	snaps, err := s.fs.GetAll(ctx, refs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*WorkPoolWithState, 0, len(snaps))
+	for i, snap := range snaps {
+		if !snap.Exists() {
+			continue // summary outlived its workpool (e.g. expired)
+		}
+		var f firestoreWorkPool
+		if err := snap.DataTo(&f); err != nil {
+			return nil, err
+		}
+		pool := toWorkPool(&f)
+		result = append(result, &WorkPoolWithState{Pool: pool, State: toWorkPoolState(pool.WorkpoolID, summaries[i])})
+	}
+	return result, nil
+}
+
 func (s *FirestoreWorkPoolStore) Get(ctx context.Context, workpoolID string) (*WorkPoolWithState, error) {
 	snap, err := s.fs.Collection(workpoolCollection).Doc(workpoolID).Get(ctx)
 	if err != nil {

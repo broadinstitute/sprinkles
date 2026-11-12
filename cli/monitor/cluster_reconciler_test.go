@@ -14,7 +14,7 @@ import (
 func TestClusterReconciler_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// A started worker means the workpool isn't idle — only the summarizer
 	// (not the cluster reconciler) transitions workpool state to idle now.
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
@@ -46,7 +46,7 @@ func TestClusterReconciler_FailedBatch_MarksFailedAndUnhealthy(t *testing.T) {
 func TestClusterReconciler_FailedBatch_AppendsDebuggingInfoToErrorLog(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 
 	w.Batches.Add(&BatchAPIRequest{
@@ -71,7 +71,7 @@ func TestClusterReconciler_FailedBatch_AppendsDebuggingInfoToErrorLog(t *testing
 func TestClusterReconciler_CancelledBatch_MarksFailedWithoutTerminating(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 
 	w.Batches.Add(&BatchAPIRequest{
@@ -95,7 +95,7 @@ func TestClusterReconciler_CancelledBatch_MarksFailedWithoutTerminating(t *testi
 func TestClusterReconciler_UnknownStatus_LeavesBatchUnchanged(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 
 	w.Batches.Add(&BatchAPIRequest{
@@ -117,7 +117,7 @@ func TestClusterReconciler_UnknownStatus_LeavesBatchUnchanged(t *testing.T) {
 func TestClusterReconciler_SucceededBatch_MarksCompleted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
 
 	w.Batches.Add(&BatchAPIRequest{
@@ -142,7 +142,7 @@ func TestClusterReconciler_FailedBatchTriggersHaltThreshold(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
 	pool.MaxConsecutiveFailedBatches = 2
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	// Two prior failed batches, recorded as batch_failed events (this is what
 	// markBatchFailed would have published when those batches were reconciled).
@@ -174,7 +174,7 @@ func TestClusterReconciler_FailedBatchTriggersHaltThreshold(t *testing.T) {
 func TestClusterReconciler_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// A started worker means the workpool isn't idle — only the summarizer
 	// (not the cluster reconciler) transitions workpool state to idle now.
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
@@ -211,7 +211,7 @@ func TestClusterReconciler_Anomaly1_MoreVMsThanExpected_AbortBatch(t *testing.T)
 func TestClusterReconciler_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch
 	w.Batches.Add(&BatchAPIRequest{
@@ -240,7 +240,7 @@ func TestClusterReconciler_Anomaly1_ExactVMCount_NoTermination(t *testing.T) {
 func TestClusterReconciler_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-1 * time.Minute) // 1 min ago, well inside grace period
 	w.Batches.Add(&BatchAPIRequest{
@@ -264,7 +264,7 @@ func TestClusterReconciler_Anomaly2_BeforeGracePeriod_NoAction(t *testing.T) {
 func TestClusterReconciler_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-6 * time.Minute) // past grace period
 	w.Batches.Add(&BatchAPIRequest{
@@ -291,7 +291,7 @@ func TestClusterReconciler_Anomaly2_NoWorkersAfterGrace_WholeBatchTerminated(t *
 func TestClusterReconciler_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-6 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -320,7 +320,7 @@ func TestClusterReconciler_Anomaly2_SomeWorkersRegistered_SurgicalTermination(t 
 func TestClusterReconciler_Anomaly2_RunningSinceNil_Skipped(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	// Batch submitted long ago but never saw RUNNING — still QUEUED.
 	w.Batches.Add(&BatchAPIRequest{
@@ -350,7 +350,7 @@ func TestClusterReconciler_Anomaly3_ZombieBelowThreshold_SurgicalTermination(t *
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
 	pool.MaxZombiesBeforeAbort = 3
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-10 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -389,7 +389,7 @@ func TestClusterReconciler_TerminateVM_UsesBatchProjectID(t *testing.T) {
 	pool.VMShutdownGracePeriod = 1 * time.Minute
 	pool.MaxZombiesBeforeAbort = 3
 	pool.ProjectID = "respecced-project"
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-10 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -417,7 +417,7 @@ func TestClusterReconciler_Anomaly3_ZombieAboveThreshold_WholeBatchAborted(t *te
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
 	pool.MaxZombiesBeforeAbort = 2
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-10 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -449,7 +449,7 @@ func TestClusterReconciler_Anomaly3_ZombieVMGone_NoTermination(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 1 * time.Minute
 	pool.MaxZombiesBeforeAbort = 3
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-10 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -478,7 +478,7 @@ func TestClusterReconciler_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 	pool := defaultPool("pool-1")
 	pool.VMShutdownGracePeriod = 5 * time.Minute
 	pool.MaxZombiesBeforeAbort = 3
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch.Add(-10 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -507,7 +507,7 @@ func TestClusterReconciler_Anomaly3_WithinGracePeriod_NoAction(t *testing.T) {
 func TestClusterReconciler_StampsRunningSince(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:         "b1",
@@ -530,7 +530,7 @@ func TestClusterReconciler_StampsRunningSince(t *testing.T) {
 func TestClusterReconciler_RunningSinceNotOverwritten(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	original := epoch.Add(-5 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{

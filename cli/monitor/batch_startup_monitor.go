@@ -11,7 +11,7 @@ import (
 // or after max_time_between_polls. Only processes pending batches; once promoted to started,
 // failed, or completed, the cluster reconciler owns the batch.
 func (a *Monitor) runBatchStartupMonitor(ctx context.Context) error {
-	pools, err := a.pools.ListAll(ctx)
+	pools, err := a.listActivePools(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}

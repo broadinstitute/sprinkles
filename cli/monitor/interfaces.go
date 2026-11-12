@@ -274,7 +274,16 @@ type BatchAPIClient interface {
 
 // WorkPoolStore reads WorkPool config and reads/writes WorkPoolState.
 type WorkPoolStore interface {
+	// ListAll returns every workpool with its state. Reads the whole WorkPool
+	// and WorkPoolSummary collections, so cost grows with the number of pools
+	// ever created; pollers should prefer ListActive.
 	ListAll(ctx context.Context) ([]*WorkPoolWithState, error)
+	// ListActive returns only the workpools whose recorded state is ok,
+	// unhealthy or halted -- i.e. not idle. A workpool with no summary state
+	// yet (never summarized) is not returned; the workpool summary poll
+	// reaches those via their job_created events. When every pool is idle
+	// this costs a single empty query regardless of how many pools exist.
+	ListActive(ctx context.Context) ([]*WorkPoolWithState, error)
 	Get(ctx context.Context, workpoolID string) (*WorkPoolWithState, error)
 	SaveState(ctx context.Context, state *WorkPoolState) error
 }

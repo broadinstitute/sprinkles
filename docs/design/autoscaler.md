@@ -541,3 +541,25 @@ last task has finished stays `ok` until its batches have wound down (worker ling
 
 To make the transition prompt, the monitor wakes the workpool summary poll whenever a batch reaches a
 terminal status (`saveTerminalBatch`), rather than waiting for the poll's fallback timer.
+
+
+### Skipping idle pools
+
+So that an idle system doesn't keep querying Firestore, the monitor avoids work for idle pools in two ways.
+
+**Only non-idle pools are listed.** The cluster reconciler, batch startup monitor, provisioning poll and
+workpool summary poll use `WorkPoolStore.ListActive`, a query on `WorkPoolSummary.state` in
+(`ok`, `unhealthy`, `halted`), instead of `ListAll` (which reads every pool ever created). With every pool idle
+that is one empty query. Because `idle` now implies no active batches, no idle pool has anything for the
+reconciler or startup monitor to do. A pool with no summary yet is not returned; the workpool summary poll
+reaches a pool that has just received a job through its `job_created` event (`pools.Get`), and that poll is
+what moves it from `idle` to `ok`, after which provisioning picks it up (via the `workpool_state_change` event).
+
+**Pollers skip runs while everything is idle.** Each `ListActive` records how many pools were non-idle. When
+that is zero and no event has asked a poller to run, the poller skips its fallback-timer run (counted as
+`idle_skips`), except for one run per idle heartbeat (5 minutes), which is the safety net for a lost Pub/Sub
+message. Events wake only the pollers they concern: any notification sent through a poller's notify func marks
+that poller as woken, so it runs even if the scheduler delivers it late as a timer run. A change in any pool's
+state forgets the count, so every poller runs until the next listing. Skipping is disabled when no job event
+receiver is configured, because without `job_created` events nothing would wake the monitor. The task recovery
+and job summary pollers don't list pools themselves; they skip based on the same count.

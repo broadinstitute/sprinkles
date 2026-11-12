@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/broadinstitute/sprinkles/scheduler"
@@ -21,6 +23,16 @@ const (
 	defaultMaxConsecutiveFailedBatches = 2
 
 	expiryCleanerInterval = 30 * time.Minute
+
+	// defaultIdleHeartbeat is how often each poller still runs while every
+	// workpool is idle and nothing has woken it. It's the safety net for a
+	// missed Pub/Sub message (or work that appeared while the monitor was
+	// down); normal wake-ups come from events, not from this timer.
+	defaultIdleHeartbeat = 5 * time.Minute
+
+	// activePoolCountUnknown means the monitor doesn't currently know how many
+	// workpools are non-idle, so no poller may be skipped.
+	activePoolCountUnknown = -1
 
 	// defaultHaltCheckWindow bounds how far back checkHaltThreshold looks in
 	// the Events log. Kept short (not an all-time window) both to keep the
@@ -109,6 +121,14 @@ type Monitor struct {
 	// RunMonitorLoop (nil until then, e.g. in unit tests that call pollers
 	// directly).
 	notifyWorkPoolSummary func()
+
+	// Idle gating (see runPoller). activePoolCount is how many non-idle
+	// workpools the most recent ListActive found, or activePoolCountUnknown.
+	activePoolCount atomic.Int64
+	idleHeartbeat   time.Duration
+	idleMu          sync.Mutex
+	wakePending     map[string]bool      // poller -> an event asked for it to run
+	lastRun         map[string]time.Time // poller -> when it last actually ran
 }
 
 // ErrorLog returns the monitor's in-memory log of recent background-poller
@@ -122,6 +142,15 @@ func (a *Monitor) PollerStats() *PollerStats { return a.stats }
 // runPoller runs one pass of the named poller, recording it in the poller
 // stats and the error log if it fails.
 func (a *Monitor) runPoller(ctx context.Context, name string, fn func(context.Context) error) {
+	if a.skipWhileIdle(name) {
+		a.stats.Skip(name)
+		return
+	}
+	a.idleMu.Lock()
+	a.lastRun[name] = a.clock.Now()
+	delete(a.wakePending, name)
+	a.idleMu.Unlock()
+
 	// Label the context so Firestore calls made by this poller are
 	// attributed to it in FirestoreCallStats.
 	ctx = WithFirestoreLabel(ctx, name)
@@ -134,6 +163,57 @@ func (a *Monitor) runPoller(ctx context.Context, name string, fn func(context.Co
 // calls (see FirestoreCallStats.NewClient) so they can be reported
 // alongside the poller stats.
 func (a *Monitor) SetFirestoreCallStats(s *FirestoreCallStats) { a.stats.firestore = s }
+
+// SetIdleHeartbeat sets how often each poller runs while every workpool is
+// idle and no event has woken it. Zero disables idle gating entirely, so
+// every poller runs on every tick.
+func (a *Monitor) SetIdleHeartbeat(d time.Duration) { a.idleHeartbeat = d }
+
+// listActivePools returns the non-idle workpools and remembers how many there
+// were, which is what lets pollers that don't list pools themselves (task
+// recovery, job summary) tell that everything is idle.
+func (a *Monitor) listActivePools(ctx context.Context) ([]*WorkPoolWithState, error) {
+	pools, err := a.pools.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	a.activePoolCount.Store(int64(len(pools)))
+	return pools, nil
+}
+
+// wakeOnNotify wraps a scheduler notify func so that calling it also records
+// that the named poller was asked to run. A woken poller is never skipped for
+// idleness, however it ends up being scheduled (the scheduler may run a
+// notification late, as a "timer" run, when throttling coalesces it).
+func (a *Monitor) wakeOnNotify(name string, notify func()) func() {
+	return func() {
+		a.idleMu.Lock()
+		a.wakePending[name] = true
+		a.idleMu.Unlock()
+		notify()
+	}
+}
+
+// skipWhileIdle reports whether the named poller can skip this run: only when
+// idle gating is on, every workpool was last seen idle, no event has asked
+// for this poller, and it has run within the idle heartbeat. Gating needs the
+// job event receiver, since job_created events are what wake the monitor
+// when work arrives; without one every poller always runs.
+func (a *Monitor) skipWhileIdle(name string) bool {
+	if a.idleHeartbeat <= 0 || a.jobEvents == nil {
+		return false
+	}
+	if a.activePoolCount.Load() != 0 {
+		return false
+	}
+	a.idleMu.Lock()
+	defer a.idleMu.Unlock()
+	if a.wakePending[name] {
+		return false
+	}
+	last, ran := a.lastRun[name]
+	return ran && a.clock.Now().Sub(last) < a.idleHeartbeat
+}
 
 // SetVerbose enables or disables verbose poll logging.
 func (a *Monitor) SetVerbose(v bool) { a.verbose = v }
@@ -202,7 +282,7 @@ func New(
 	pubsub PubSubReceiver,
 	dbName string,
 ) *Monitor {
-	return &Monitor{
+	m := &Monitor{
 		clock:    clock,
 		batchAPI: batchAPI,
 		pools:    pools,
@@ -214,7 +294,13 @@ func New(
 		errorLog: NewErrorLog(DefaultErrorLogCapacity),
 		stats:    NewPollerStats(clock),
 		trigger:  TriggerTimer,
+
+		idleHeartbeat: defaultIdleHeartbeat,
+		wakePending:   map[string]bool{},
+		lastRun:       map[string]time.Time{},
 	}
+	m.activePoolCount.Store(activePoolCountUnknown)
+	return m
 }
 
 // RunMonitorLoop runs the monitor until ctx is cancelled.
@@ -262,6 +348,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.runPoller(ctx, PollerClusterReconciler, a.runClusterReconciler)
 		a.vlogf("Completed: Reconciling our records against google's")
 	})
+	notifyClusterReconciler = a.wakeOnNotify(PollerClusterReconciler, notifyClusterReconciler)
 
 	// Provisioner: Responsible for requesting VMs for pending tasks. Triggered by job_created events; falls back to 1-minute timer.
 	notifyProvisioning := sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
@@ -269,6 +356,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.runPoller(ctx, PollerProvisioning, a.runProvisioningPoll)
 		a.vlogf("Completed: Checking for workpools which need new workers")
 	})
+	notifyProvisioning = a.wakeOnNotify(PollerProvisioning, notifyProvisioning)
 
 	// Task recovery: Fixed 30-second interval; no notification trigger.
 	sched.Add(defaultMinTimeBetweenPolls, defaultMaxTimeBetweenPolls, func() {
@@ -283,6 +371,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.runPoller(ctx, PollerBatchStartup, a.runBatchStartupMonitor)
 		a.vlogf("Completed: Checking to see if workers successfully starting")
 	})
+	notifyBatchStartupMonitor = a.wakeOnNotify(PollerBatchStartup, notifyBatchStartupMonitor)
 
 	// Expiry cleaner: deletes documents whose expiry field is in the past. Fixed 30-minute interval.
 	if a.expiry != nil {
@@ -301,6 +390,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.runPoller(ctx, PollerJobSummary, a.runJobSummaryPoll)
 		a.vlogf("Completed: Computing job summaries")
 	})
+	notifyJobSummary = a.wakeOnNotify(PollerJobSummary, notifyJobSummary)
 
 	// WorkPool summary poll: recomputes WorkPoolSummary for every workpool.
 	// Triggered by batch notifications and job events; falls back to max interval.
@@ -310,6 +400,7 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.runPoller(ctx, PollerWorkPoolSummary, a.runWorkPoolSummaryPoll)
 		a.vlogf("Completed: Compute workpool summaries")
 	})
+	notifyWorkPoolSummary = a.wakeOnNotify(PollerWorkPoolSummary, notifyWorkPoolSummary)
 
 	a.notifyWorkPoolSummary = notifyWorkPoolSummary
 

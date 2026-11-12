@@ -196,6 +196,8 @@ export interface MonitorPollerStatus {
   last_duration_ms: number;
   last_error: string;
   last_error_at: string | null;
+  /** When the poller last skipped a run because every workpool was idle. */
+  last_skipped: string | null;
   /** Cumulative work counters since the monitor started. */
   counters: Record<string, number>;
 }

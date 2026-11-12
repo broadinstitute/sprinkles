@@ -263,6 +263,15 @@ func (s *FakeWorkPoolStore) Add(pool *WorkPool) {
 	s.pools[pool.WorkpoolID] = copyPool(pool)
 }
 
+// AddActive adds a pool that is already in the ok state: what a pool with
+// in-flight batches looks like in real use (the monitor only creates batches
+// for non-idle pools). ListActive, which the pollers use, skips pools without
+// a non-idle state.
+func (s *FakeWorkPoolStore) AddActive(pool *WorkPool) {
+	s.Add(pool)
+	s.AddState(&WorkPoolState{WorkpoolID: pool.WorkpoolID, State: WorkPoolStatusOK})
+}
+
 func (s *FakeWorkPoolStore) AddState(state *WorkPoolState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,6 +315,25 @@ func (s *FakeWorkPoolStore) ListAll(ctx context.Context) ([]*WorkPoolWithState, 
 	var result []*WorkPoolWithState
 	for _, p := range s.pools {
 		result = append(result, s.makeWS(p))
+	}
+	return result, nil
+}
+
+// ListActive mirrors the Firestore store: only pools whose recorded state is
+// ok, unhealthy or halted (a pool with no state is not returned).
+func (s *FakeWorkPoolStore) ListActive(ctx context.Context) ([]*WorkPoolWithState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var result []*WorkPoolWithState
+	for _, p := range s.pools {
+		st := s.states[p.WorkpoolID]
+		if st == nil {
+			continue
+		}
+		switch st.State {
+		case WorkPoolStatusOK, WorkPoolStatusUnhealthy, WorkPoolStatusHalted:
+			result = append(result, s.makeWS(p))
+		}
 	}
 	return result, nil
 }

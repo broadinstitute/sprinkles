@@ -292,7 +292,7 @@ func TestRecordIncident_PublishesIncident(t *testing.T) {
 func TestIncident_FlowsThroughToWorkPoolSummary(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "started"})
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:    "b1",
@@ -375,7 +375,7 @@ func TestBatchReachingTerminalStatusNotifiesWorkPoolSummary(t *testing.T) {
 	for name, apiStatus := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld()
-			w.Pools.Add(defaultPool("pool-1"))
+			w.Pools.AddActive(defaultPool("pool-1"))
 			w.Batches.Add(&BatchAPIRequest{BatchID: "b1", JobID: "job-1", WorkpoolID: "pool-1", Status: BatchStatusStarted, SubmittedAt: epoch})
 			w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, apiStatus)
 			notified := 0
@@ -390,7 +390,7 @@ func TestBatchReachingTerminalStatusNotifiesWorkPoolSummary(t *testing.T) {
 
 func TestBatchNotYetTerminalDoesNotNotifyWorkPoolSummary(t *testing.T) {
 	w := newWorld()
-	w.Pools.Add(defaultPool("pool-1"))
+	w.Pools.AddActive(defaultPool("pool-1"))
 	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", JobID: "job-1", WorkpoolID: "pool-1", Status: BatchStatusStarted, SubmittedAt: epoch})
 	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusUnknown)
 	notified := 0

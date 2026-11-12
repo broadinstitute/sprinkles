@@ -14,7 +14,7 @@ import (
 func TestBatchStartupMonitor_RunningJob_StampsRunningSince(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	w.Batches.Add(&BatchAPIRequest{
 		BatchID:      "b1",
@@ -37,7 +37,7 @@ func TestBatchStartupMonitor_RunningJob_StampsRunningSince(t *testing.T) {
 func TestBatchStartupMonitor_RunningSinceNotOverwritten(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	original := epoch.Add(-3 * time.Minute)
 	w.Batches.Add(&BatchAPIRequest{
@@ -61,7 +61,7 @@ func TestBatchStartupMonitor_RunningSinceNotOverwritten(t *testing.T) {
 func TestBatchStartupMonitor_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	// A pending task means the workpool isn't idle — only the summarizer
 	// (not the batch startup monitor) transitions workpool state now.
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
@@ -93,7 +93,7 @@ func TestBatchStartupMonitor_FailedJob_MarksFailedAndUnhealthy(t *testing.T) {
 func TestBatchStartupMonitor_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 	w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: TaskStatusPending})
 
 	w.Batches.Add(&BatchAPIRequest{
@@ -122,7 +122,7 @@ func TestBatchStartupMonitor_SucceededWithNoWorkers_MarksFailedAndUnhealthy(t *t
 func TestBatchStartupMonitor_WorkerRegistered_PromotesToStarted(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	runningSince := epoch
 	w.Batches.Add(&BatchAPIRequest{
@@ -147,7 +147,7 @@ func TestBatchStartupMonitor_WorkerRegistered_PromotesToStarted(t *testing.T) {
 func TestBatchStartupMonitor_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	// Submitted 20 min ago, never reached RUNNING.
 	w.Batches.Add(&BatchAPIRequest{
@@ -171,7 +171,7 @@ func TestBatchStartupMonitor_StuckInQueue_MarksFailedAfterMaxTimeInQueue(t *test
 func TestBatchStartupMonitor_NotYetPastMaxTimeInQueue_NoAction(t *testing.T) {
 	w := newWorld()
 	pool := defaultPool("pool-1")
-	w.Pools.Add(pool)
+	w.Pools.AddActive(pool)
 
 	// Submitted only 5 min ago — well inside the queue deadline.
 	w.Batches.Add(&BatchAPIRequest{

@@ -54,6 +54,7 @@ type pollerState struct {
 	lastDuration        time.Duration
 	lastError           string
 	lastErrorAt         time.Time
+	lastSkipped         time.Time
 	counters            map[string]int64
 }
 
@@ -72,7 +73,10 @@ type PollerSnapshot struct {
 	LastDuration        time.Duration
 	LastError           string
 	LastErrorAt         time.Time
-	Counters            map[string]int64
+	// LastSkipped is when the poller last skipped a run because every
+	// workpool was idle (see Monitor.skipWhileIdle).
+	LastSkipped time.Time
+	Counters    map[string]int64
 }
 
 // FirestoreCalls returns the monitor's Firestore call counters, or nil if
@@ -160,6 +164,21 @@ func (s *PollerStats) Run(name, trigger string, fn func() error) error {
 	return err
 }
 
+// Skip records that the named poller skipped a run because every workpool was
+// idle. It counts under "idle_skips" and stamps LastSkipped, so a poller that
+// is merely idling isn't mistaken for one that has gone quiet.
+func (s *PollerStats) Skip(name string) {
+	if s == nil {
+		return
+	}
+	now := s.clock.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.state(name)
+	p.counters["idle_skips"]++
+	p.lastSkipped = now
+}
+
 // Add increments one of the named poller's cumulative work counters (e.g.
 // "batches_submitted"); counters count since the monitor started.
 func (s *PollerStats) Add(name, counter string, n int64) {
@@ -199,6 +218,7 @@ func (s *PollerStats) Snapshot() PollerStatsSnapshot {
 			LastDuration:        p.lastDuration,
 			LastError:           p.lastError,
 			LastErrorAt:         p.lastErrorAt,
+			LastSkipped:         p.lastSkipped,
 			Counters:            counters,
 		})
 	}

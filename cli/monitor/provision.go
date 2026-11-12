@@ -26,7 +26,7 @@ func CreateBatchID() string {
 // workpool's budget before falling back to non-preemptible.
 func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 
-	all, err := a.pools.ListAll(ctx)
+	all, err := a.listActivePools(ctx)
 	if err != nil {
 		return fmt.Errorf("list workpools: %w", err)
 	}
@@ -34,11 +34,11 @@ func (a *Monitor) runProvisioningPoll(ctx context.Context) error {
 	var pools []*WorkPoolWithState
 	for _, ws := range all {
 		a.vlogf("runProvisioningPoll pool %s status = %s", ws.Pool.WorkpoolID, string(ws.State.State))
-		if ws.State.State != WorkPoolStatusIdle && ws.State.State != WorkPoolStatusHalted {
+		if ws.State.State != WorkPoolStatusHalted {
 			pools = append(pools, ws)
 		}
 	}
-	a.vlogf("After filtering by not idle and not halted: %d", len(pools))
+	a.vlogf("After filtering out halted: %d", len(pools))
 
 	if len(pools) > 0 {
 		a.lastActivity = time.Now()
