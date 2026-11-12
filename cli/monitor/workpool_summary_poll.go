@@ -75,13 +75,16 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 
 	batchStateCounts := make(map[string]int)
 	preemptibleBatchIDs := make(map[string]bool)
-	var expectedPreemptible, expectedNonpreemptible, unhealthyCount int
+	var expectedPreemptible, expectedNonpreemptible, unhealthyCount, activeBatchCount int
 	for _, b := range batches {
 		batchStateCounts[string(b.Status)]++
 		if b.Unhealthy {
 			unhealthyCount++
 		}
 		active := b.Status == BatchStatusPending || b.Status == BatchStatusStarted
+		if active {
+			activeBatchCount++
+		}
 		if b.Preemptible {
 			preemptibleBatchIDs[b.BatchID] = true
 			if active {
@@ -113,8 +116,10 @@ func (a *Monitor) updateWorkPoolSummary(ctx context.Context, ws *WorkPoolWithSta
 		return err
 	}
 
-	// idle when no non-terminal workers or tasks remain.
-	nonTerminal := 0
+	// idle only when no non-terminal workers, tasks or batches remain. A
+	// batch that is still pending/started means VMs may still be running (or
+	// about to) even once every task is done and the workers have stopped.
+	nonTerminal := activeBatchCount
 	for _, w := range workers {
 		if w.Status != "stopped" && w.Status != "zombie" {
 			nonTerminal++

@@ -87,7 +87,7 @@ These are properties of the `WorkPools` collection so they can be tuned per work
 
 | Status      | Meaning                                                           |
 | ----------- | ----------------------------------------------------------------- |
-| `idle`      | No VMs running; resting state between jobs                        |
+| `idle`      | Nothing in flight: no non-terminal tasks, workers or batches      |
 | `ok`        | VMs running, watchdog sees no problems                            |
 | `unhealthy` | Watchdog detected and acted on anomalies; provisioning continues  |
 | `halted`    | Provisioning suspended due to too many consecutive failed batches |
@@ -99,8 +99,8 @@ Transitions:
 | `idle`      | `ok`        | New job submitted (provisioning starts)                                   |
 | `halted`    | `ok`        | New job submitted (user's signal that the configuration problem is fixed) |
 | `ok`        | `unhealthy` | Watchdog detects an anomaly                                               |
-| `ok`        | `idle`      | Last VM is gone; no pending tasks                                         |
-| `unhealthy` | `idle`      | Last VM is gone (after batch terminated by watchdog or naturally)         |
+| `ok`        | `idle`      | No non-terminal tasks, workers or batches remain                          |
+| `unhealthy` | `idle`      | No non-terminal tasks, workers or batches remain                          |
 | `unhealthy` | `halted`    | Consecutive failed batch threshold exceeded                               |
 
 If a job is submitted when status is `ok` or `unhealthy`, the status is left unchanged.
@@ -532,9 +532,12 @@ With `max_consecutive_failed_batches = 2`, halting a persistently-broken configu
 to ~10 minutes, wasting two batches worth of VMs. Lowering `max_time_to_start_worker` helps but has a floor set
 by real worker startup time.
 
-### Idle transition vs. a lagging Batch API status
+### What keeps a workpool out of `idle`
 
-The idle transition keys off the live VM count. If a batch's VMs all disappear while the Batch API still
-reports `RUNNING`, the workpool can flip to `idle` while the batch record is still `started`; it resolves on
-the next poll once the Batch API reports a terminal status. Harmless, but it means `idle` is not a guarantee
-that every batch record is terminal.
+A workpool is `idle` only when it has no non-terminal tasks, no non-terminal workers (`stopped`/`zombie`
+are terminal) and no non-terminal batches (`pending` or `started`; `completed`, `failed`, `deleted` and
+`terminated` are terminal). So `idle` guarantees that no batch record is still active, and a pool whose
+last task has finished stays `ok` until its batches have wound down (worker linger plus VM teardown).
+
+To make the transition prompt, the monitor wakes the workpool summary poll whenever a batch reaches a
+terminal status (`saveTerminalBatch`), rather than waiting for the poll's fallback timer.

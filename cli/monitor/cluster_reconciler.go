@@ -61,7 +61,7 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 	if apiStatus == BatchJobStatusDeleted {
 		log.Printf("cluster reconciler: batch %s: GCP job %s no longer exists (404); marking batch as deleted", batch.BatchID, batch.JobID)
 		batch.Status = BatchStatusDeleted
-		return true, a.batches.Save(ctx, batch)
+		return true, a.saveTerminalBatch(ctx, batch)
 	}
 
 	// Stamp running_since the first time we observe RUNNING.
@@ -87,7 +87,7 @@ func (a *Monitor) reconcileBatch(ctx context.Context, ws *WorkPoolWithState, bat
 
 	if apiStatus == BatchJobStatusSucceeded {
 		batch.Status = BatchStatusCompleted
-		return true, a.batches.Save(ctx, batch)
+		return true, a.saveTerminalBatch(ctx, batch)
 	}
 
 	if apiStatus == BatchJobStatusCancelled {

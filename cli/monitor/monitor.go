@@ -105,6 +105,10 @@ type Monitor struct {
 	// started (TriggerNotification or TriggerTimer). Only touched from
 	// RunMonitorLoop's goroutine, which runs callbacks one at a time.
 	trigger string
+	// notifyWorkPoolSummary wakes the workpool summary poll early; set by
+	// RunMonitorLoop (nil until then, e.g. in unit tests that call pollers
+	// directly).
+	notifyWorkPoolSummary func()
 }
 
 // ErrorLog returns the monitor's in-memory log of recent background-poller
@@ -307,6 +311,8 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 		a.vlogf("Completed: Compute workpool summaries")
 	})
 
+	a.notifyWorkPoolSummary = notifyWorkPoolSummary
+
 	// Route PubSub notifications to the appropriate pollers in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.
 	fatalErrCh := make(chan error, 1)
@@ -439,6 +445,21 @@ func (a *Monitor) recordIncident(ctx context.Context, workpoolID, incidentType, 
 	}
 }
 
+// saveTerminalBatch saves a batch that has just reached a terminal status
+// (completed, failed, deleted or terminated) and wakes the workpool summary
+// poll. A pool is only idle once it has no pending/started batches (see
+// updateWorkPoolSummary), so the summary must be recomputed right after a
+// batch ends rather than waiting for its next timer.
+func (a *Monitor) saveTerminalBatch(ctx context.Context, batch *BatchAPIRequest) error {
+	if err := a.batches.Save(ctx, batch); err != nil {
+		return err
+	}
+	if a.notifyWorkPoolSummary != nil {
+		a.notifyWorkPoolSummary()
+	}
+	return nil
+}
+
 // markBatchFailed records batch as failed (GCP itself reported the job as
 // failed), logs an incident, and publishes a batch_failed event. Use
 // markBatchTerminated instead when the monitor is the one deciding to kill an
@@ -467,7 +488,7 @@ func (a *Monitor) markBatchDone(ctx context.Context, ws *WorkPoolWithState, batc
 	batch.Status = status
 	batch.Unhealthy = true
 	a.recordIncident(ctx, ws.Pool.WorkpoolID, incidentType, reason)
-	if err := a.batches.Save(ctx, batch); err != nil {
+	if err := a.saveTerminalBatch(ctx, batch); err != nil {
 		return fmt.Errorf("save batch: %w", err)
 	}
 	if a.batchOutcomes != nil {

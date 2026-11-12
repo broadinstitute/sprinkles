@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -327,4 +328,75 @@ func TestIncident_FlowsThroughToWorkPoolSummary(t *testing.T) {
 	assert.Equal(t, 1, summary.IncidentCount)
 	assert.Equal(t, w.Events.WorkpoolIncidents[0].Message, summary.StateMessage)
 	assert.Equal(t, w.Events.WorkpoolIncidents[0].Timestamp, summary.LastIncidentAt)
+}
+
+// A pending/started batch means VMs may still be running (or coming up), so
+// it keeps a pool out of idle even when every task is done and every worker
+// has stopped.
+func TestSummaryPoll_ActiveBatchKeepsPoolFromIdle(t *testing.T) {
+	for _, status := range []BatchStatus{BatchStatusPending, BatchStatusStarted} {
+		t.Run(string(status), func(t *testing.T) {
+			w := newWorld()
+			w.Pools.Add(defaultPool("pool-1"))
+			w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
+			w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "stopped"})
+			w.Tasks.Add(&Task{TaskID: "t1", WorkpoolID: "pool-1", Status: "success"})
+			w.Batches.Add(&BatchAPIRequest{BatchID: "b1", JobID: "job-1", WorkpoolID: "pool-1", Status: status, SubmittedAt: epoch})
+
+			require.NoError(t, w.A.runWorkPoolSummaryPoll(context.Background()))
+
+			assert.Equal(t, WorkPoolStatusOK, w.Pools.MustGetState("pool-1").State)
+		})
+	}
+}
+
+func TestSummaryPoll_OnlyTerminalBatchesAllowIdle(t *testing.T) {
+	w := newWorld()
+	w.Pools.Add(defaultPool("pool-1"))
+	w.Pools.AddState(&WorkPoolState{WorkpoolID: "pool-1", State: WorkPoolStatusOK})
+	w.Workers.Add(&Worker{WorkerID: "w1", WorkpoolID: "pool-1", Status: "stopped"})
+	for i, status := range []BatchStatus{BatchStatusCompleted, BatchStatusFailed, BatchStatusDeleted, BatchStatusTerminated} {
+		w.Batches.Add(&BatchAPIRequest{BatchID: fmt.Sprintf("b%d", i), WorkpoolID: "pool-1", Status: status, SubmittedAt: epoch})
+	}
+
+	require.NoError(t, w.A.runWorkPoolSummaryPoll(context.Background()))
+
+	assert.Equal(t, WorkPoolStatusIdle, w.Pools.MustGetState("pool-1").State)
+}
+
+// When a batch ends, the workpool summary must be woken so the pool can go
+// idle promptly instead of waiting for its fallback timer.
+func TestBatchReachingTerminalStatusNotifiesWorkPoolSummary(t *testing.T) {
+	cases := map[string]BatchJobStatus{
+		"completed": BatchJobStatusSucceeded,
+		"failed":    BatchJobStatusFailed,
+		"deleted":   BatchJobStatusDeleted,
+	}
+	for name, apiStatus := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld()
+			w.Pools.Add(defaultPool("pool-1"))
+			w.Batches.Add(&BatchAPIRequest{BatchID: "b1", JobID: "job-1", WorkpoolID: "pool-1", Status: BatchStatusStarted, SubmittedAt: epoch})
+			w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, apiStatus)
+			notified := 0
+			w.A.notifyWorkPoolSummary = func() { notified++ }
+
+			require.NoError(t, w.A.runClusterReconciler(context.Background()))
+
+			assert.Equal(t, 1, notified)
+		})
+	}
+}
+
+func TestBatchNotYetTerminalDoesNotNotifyWorkPoolSummary(t *testing.T) {
+	w := newWorld()
+	w.Pools.Add(defaultPool("pool-1"))
+	w.Batches.Add(&BatchAPIRequest{BatchID: "b1", JobID: "job-1", WorkpoolID: "pool-1", Status: BatchStatusStarted, SubmittedAt: epoch})
+	w.BatchAPI.AddJob("job-1", "b1", "pool-1", 1, BatchJobStatusUnknown)
+	notified := 0
+	w.A.notifyWorkPoolSummary = func() { notified++ }
+
+	require.NoError(t, w.A.runClusterReconciler(context.Background()))
+
+	assert.Equal(t, 0, notified)
 }
