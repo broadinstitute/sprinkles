@@ -62,9 +62,15 @@ func (e *retryEnv) post(t *testing.T, path string, body any) (int, map[string]an
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+e.apiKey)
+	return e.do(t, req)
+}
+
+// do sends req and decodes a JSON object response.
+func (e *retryEnv) do(t *testing.T, req *http.Request) (int, map[string]any) {
+	t.Helper()
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("POST %s: %v", path, err)
+		t.Fatalf("%s %s: %v", req.Method, req.URL.Path, err)
 	}
 	defer resp.Body.Close()
 	var out map[string]any

@@ -4,6 +4,7 @@ import { RefreshToggle } from "../components/RefreshControls";
 import JobsTable, { labelColors } from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
 import { apiFetch } from "../api/client";
+import { DELETED_JOB_STATE } from "../data/jobStates";
 import WorkPoolSummaryCard from "../components/WorkPoolSummaryCard";
 import type { WorkpoolInfo } from "../components/WorkPoolSummaryCard";
 
@@ -19,7 +20,6 @@ const SYSTEM_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
-  "hidden",
 ]);
 
 // ── Colors ───────────────────────────────────────────────────────────────────
@@ -86,7 +86,11 @@ function useWorkerPools(
     return workpools.map((wp) => ({
       info: wp,
       activeWorkerCount: workerCounts[wp.workpool_id] ?? 0,
-      jobs: jobs.filter((j) => j.workpool_id === wp.workpool_id),
+      // Deleted jobs are gone as far as the pool summary is concerned.
+      jobs: jobs.filter(
+        (j) =>
+          j.workpool_id === wp.workpool_id && j.state !== DELETED_JOB_STATE,
+      ),
     }));
   }, [workpools, workerCounts, jobs]);
 }
@@ -480,38 +484,21 @@ function FacetKeyButton({
   );
 }
 
-// ── Hide/unhide jobs ─────────────────────────────────────────────────────────
+// ── Delete job ───────────────────────────────────────────────────────────────
 
-type JobLabel = { name: string; value: string };
-
-// Toggling "hidden" is just a label mutation -- add or remove hidden=true via
-// the generic labels endpoint, leaving every other label on the job alone.
-// Returns the job's resulting label list, as persisted server-side.
-async function setJobHidden(
-  jobId: string,
-  hidden: boolean,
-): Promise<JobLabel[]> {
-  const res = await apiFetch(`/api/v1/job/${jobId}/labels`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      hidden
-        ? { set: [{ name: "hidden", value: "true" }] }
-        : { remove: ["hidden"] },
-    ),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data: { labels: JobLabel[] } = await res.json();
-  return data.labels;
-}
-
-// Client-side mirror of the backend's set/remove label op, used to compute an
-// optimistic label list before the request round-trips.
-function withHiddenLabel(labels: JobLabel[], hidden: boolean): JobLabel[] {
-  const withoutHidden = labels.filter((l) => l.name !== "hidden");
-  return hidden
-    ? [...withoutHidden, { name: "hidden", value: "true" }]
-    : withoutHidden;
+// Deleting is permanent and only allowed once a job has finished; the backend
+// enforces both (409 otherwise) and explains why in the error body.
+async function deleteJobRequest(jobId: string): Promise<void> {
+  const res = await apiFetch(`/api/v1/job/${jobId}`, { method: "DELETE" });
+  if (res.ok) return;
+  let reason = `HTTP ${res.status}`;
+  try {
+    const body: { error?: string } = await res.json();
+    if (body.error) reason = body.error;
+  } catch {
+    /* no JSON body; keep the status */
+  }
+  throw new Error(reason);
 }
 
 // ── Cancel job ───────────────────────────────────────────────────────────────
@@ -526,29 +513,28 @@ async function cancelJobRequest(jobId: string): Promise<void> {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function JobList() {
-  const { jobs, jobCache, paused, setPaused, lastUpdatedAt, updateJobLabels } =
+  const { jobs, jobCache, paused, setPaused, lastUpdatedAt, markJobDeleted } =
     useEvents();
   const [search, setSearch] = useState("");
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
-  const [showHidden, setShowHidden] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
 
-  const toggleHidden = useCallback(
-    (jobId: string, currentlyHidden: boolean) => {
-      const nextHidden = !currentlyHidden;
-      const priorLabels = jobCache[jobId]?.labels ?? [];
-      // Reflect the toggle immediately (before the request resolves) so
-      // there's no perceptible delay; reconcile with the server's actual
-      // result once it lands, or roll back if the write failed.
-      updateJobLabels(jobId, withHiddenLabel(priorLabels, nextHidden));
-      setJobHidden(jobId, nextHidden)
-        .then((labels) => updateJobLabels(jobId, labels))
+  // The request only succeeds for a job that has finished, and deleting is
+  // final, so there's nothing to roll back: on success flip the job to
+  // deleted locally (the next poll reports the same), on failure tell the
+  // user why and let the row's button be retried.
+  const handleDeleteJob = useCallback(
+    (jobId: string) => {
+      return deleteJobRequest(jobId)
+        .then(() => markJobDeleted(jobId))
         .catch((err) => {
-          console.error("[JobList] toggle hidden failed:", err);
-          updateJobLabels(jobId, priorLabels);
+          console.error("[JobList] delete job failed:", err);
+          window.alert(`Failed to delete job ${jobId}: ${err.message ?? err}`);
+          throw err;
         });
     },
-    [jobCache, updateJobLabels],
+    [markJobDeleted],
   );
 
   // Cancellation is best-effort/asynchronous server-side (see
@@ -614,12 +600,12 @@ export default function JobList() {
     return jobsWithMeta.filter((j) => j.submitDate.getTime() >= cutoffMs);
   }, [jobsWithMeta, timePreset]);
 
-  // Stage 2: visibility filter -- hides jobs tagged hidden=true unless the
-  // operator has checked "Show hidden jobs", regardless of search/facets.
+  // Stage 2: visibility filter -- hides deleted jobs unless the operator has
+  // checked "Show deleted jobs", regardless of search/facets.
   const visibilityFiltered = useMemo(() => {
-    if (showHidden) return timeFiltered;
-    return timeFiltered.filter((j) => j.metadata?.hidden !== "true");
-  }, [timeFiltered, showHidden]);
+    if (showDeleted) return timeFiltered;
+    return timeFiltered.filter((j) => j.state !== DELETED_JOB_STATE);
+  }, [timeFiltered, showDeleted]);
 
   // Stage 3: search filter
   const searchFiltered = useMemo(() => {
@@ -764,13 +750,13 @@ export default function JobList() {
                   {activeFacetCount !== 1 ? "s" : ""}
                 </button>
               )}
-              <label className="jl-show-hidden">
+              <label className="jl-show-deleted">
                 <input
                   type="checkbox"
-                  checked={showHidden}
-                  onChange={(e) => setShowHidden(e.target.checked)}
+                  checked={showDeleted}
+                  onChange={(e) => setShowDeleted(e.target.checked)}
                 />
-                Show hidden jobs
+                Show deleted jobs
               </label>
             </div>
 
@@ -787,7 +773,7 @@ export default function JobList() {
                 search={search}
                 facets={facets}
                 onToggleFacet={toggleFacet}
-                onToggleHidden={toggleHidden}
+                onDeleteJob={handleDeleteJob}
                 onCancelJob={handleCancelJob}
               />
             </section>
@@ -917,7 +903,7 @@ const styles = `
     overflow: hidden;
   }
 
-  .jl-show-hidden {
+  .jl-show-deleted {
     display: flex;
     align-items: center;
     gap: 5px;

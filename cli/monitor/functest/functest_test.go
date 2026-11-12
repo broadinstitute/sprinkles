@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	monitor "github.com/broadinstitute/sprinkles/monitor"
 	"github.com/broadinstitute/sprinkles/scheduler"
 )
@@ -520,6 +521,19 @@ func TestReviveJobSummary(t *testing.T) {
 	}
 	if got := state(unchanged); got.State != monitor.JobStatusError {
 		t.Errorf("unchanged job: want state error, got %s", got.State)
+	}
+
+	// Deleted is final: even though the tasks are pending (e.g. a retry raced
+	// the delete), the summary must stay deleted and be left untouched.
+	deletedID := seed("pending")
+	if _, err := fs.Collection(monitor.CollectionJobSummary).Doc(deletedID).Update(ctx, []firestore.Update{{Path: "state", Value: string(monitor.JobStatusDeleted)}}); err != nil {
+		t.Fatalf("marking summary deleted: %v", err)
+	}
+	if err := m.ReviveJobSummary(ctx, deletedID); err != nil {
+		t.Fatalf("ReviveJobSummary on deleted job: %v", err)
+	}
+	if got := state(deletedID); got.State != monitor.JobStatusDeleted {
+		t.Errorf("deleted job: want state to stay deleted, got %s", got.State)
 	}
 
 	// A job with no summary is a no-op.

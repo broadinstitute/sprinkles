@@ -415,15 +415,31 @@ const (
 	JobStatusSuccess               JobStatus = "success"
 	JobStatusError                 JobStatus = "error"
 	JobStatusFailed                JobStatus = "failed"
+	// JobStatusDeleted is set by an explicit user delete, never derived from
+	// task counts (computeJobStatus never returns it). It is terminal and final:
+	// only a job already in one of the computed terminal states can become
+	// deleted (see CanDeleteJob), and a deleted job never changes state again.
+	// The monitor must leave a deleted job's summary alone.
+	JobStatusDeleted JobStatus = "deleted"
 )
 
-// IsTerminalJobStatus reports whether s is a terminal job status.
+// IsTerminalJobStatus reports whether s is a terminal job status. Deleted is
+// terminal (and final); it is what a job reaches after one of the others.
 func IsTerminalJobStatus(s JobStatus) bool {
 	switch s {
-	case JobStatusSuccess, JobStatusError, JobStatusFailed, JobStatusKilled:
+	case JobStatusSuccess, JobStatusError, JobStatusFailed, JobStatusKilled, JobStatusDeleted:
 		return true
 	}
 	return false
+}
+
+// CanDeleteJob reports whether a job in state s may transition to deleted:
+// only jobs that finished on their own (success, error, failed or killed). An
+// already-deleted job can't be deleted again (callers treat that as a no-op),
+// and a job that is still pending or in progress must be cancelled and
+// allowed to finish first.
+func CanDeleteJob(s JobStatus) bool {
+	return IsTerminalJobStatus(s) && s != JobStatusDeleted
 }
 
 // Label is a user-defined key/value tag attached to a job.

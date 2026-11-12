@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  DELETED_JOB_STATE,
+  TERMINAL_JOB_STATES,
+  canDeleteJob,
+} from "../data/jobStates";
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -7,7 +12,6 @@ const SYSTEM_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
-  "hidden",
 ]);
 
 const ACTIVE_TASK_STATES = new Set([
@@ -18,10 +22,10 @@ const ACTIVE_TASK_STATES = new Set([
 ]);
 const FAILURE_TASK_STATES = new Set(["error", "failed", "killed"]);
 
-// Job-level state values (monitor.JobStatus on the Go side) that are
-// terminal -- distinct from the per-task states above. A job not yet in one
-// of these states is cancellable.
-const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
+// Job-level state values are monitor.JobStatus on the Go side (see
+// data/jobStates.ts) -- distinct from the per-task states above. A job not
+// yet in a terminal state is cancellable; one that finished on its own is
+// deletable.
 
 export interface JobsTableTask {
   state: string;
@@ -35,8 +39,9 @@ export interface JobsTableRow {
   created_at: string;
   tasks: JobsTableTask[];
   metadata?: Record<string, string>;
-  /** Job-level state (pending/in_progress/.../success/error/failed/killed).
-   * Used to decide whether the cancel action should be shown. */
+  /** Job-level state (pending/in_progress/.../success/error/failed/killed/
+   * deleted). Decides whether the cancel and delete actions are shown, and
+   * whether the row is marked as deleted. */
   state?: string;
 }
 
@@ -46,10 +51,11 @@ export interface JobsTableProps {
   facets?: Record<string, Set<string>>;
   onToggleFacet?: (k: string, v: string) => void;
   emptyMessage?: string;
-  /** Called with a row's job_id and its current hidden state (before the
-   * toggle) when its trash icon is clicked. Omit to hide the column
-   * entirely. */
-  onToggleHidden?: (jobId: string, currentlyHidden: boolean) => void;
+  /** Called with a row's job_id when its trash icon is clicked (after the
+   * user confirms). Only shown for jobs that have finished on their own
+   * (success/error/failed/killed); deleting is permanent. Omit to hide the
+   * action. Rejecting re-enables the button. */
+  onDeleteJob?: (jobId: string) => Promise<void>;
   /** Called with a row's job_id when its cancel ("X") icon is clicked (after
    * the user confirms). Only shown for jobs whose state is non-terminal.
    * Omit to hide the action. Rejecting re-enables the button. */
@@ -105,7 +111,7 @@ export function formatTimestamp(d: Date): string {
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
     ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(
-      d.getSeconds()
+      d.getSeconds(),
     )} ${LOCAL_TZ}`
   );
 }
@@ -137,7 +143,7 @@ function LabelChips({
 }) {
   if (!metadata) return null;
   const entries = Object.entries(metadata).filter(
-    ([k]) => !SYSTEM_LABEL_KEYS.has(k)
+    ([k]) => !SYSTEM_LABEL_KEYS.has(k),
   );
   if (entries.length === 0) return null;
   const q = search.trim().toLowerCase();
@@ -209,7 +215,7 @@ function LabelChips({
   );
 }
 
-// ── Hide/unhide action ────────────────────────────────────────────────────
+// ── Delete action ────────────────────────────────────────────────────────
 
 function TrashIcon({ color }: { color: string }) {
   return (
@@ -232,34 +238,47 @@ function TrashIcon({ color }: { color: string }) {
   );
 }
 
-function HideJobButton({
+function DeleteJobButton({
   jobId,
-  hidden,
-  onToggleHidden,
+  onDeleteJob,
 }: {
   jobId: string;
-  hidden: boolean;
-  onToggleHidden: (jobId: string, currentlyHidden: boolean) => void;
+  onDeleteJob: (jobId: string) => Promise<void>;
 }) {
+  const [deleting, setDeleting] = useState(false);
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
-        onToggleHidden(jobId, hidden);
+        if (deleting) return;
+        if (
+          !window.confirm(
+            `Delete job ${jobId}? It is removed from the job list. This cannot be undone.`,
+          )
+        ) {
+          return;
+        }
+        setDeleting(true);
+        // On success the row leaves the default list (or is marked deleted
+        // and loses this button), so the button needn't be re-enabled. On
+        // failure, re-enable it so the user can try again.
+        onDeleteJob(jobId).catch(() => setDeleting(false));
       }}
-      title={hidden ? "Unhide job" : "Hide job"}
+      disabled={deleting}
+      title="Delete job"
       style={{
         all: "unset",
-        cursor: "pointer",
+        cursor: deleting ? "default" : "pointer",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
         width: 22,
         height: 22,
         borderRadius: 4,
+        opacity: deleting ? 0.4 : 1,
       }}
     >
-      <TrashIcon color={hidden ? "#c62828" : "#bbb"} />
+      <TrashIcon color="#bbb" />
     </button>
   );
 }
@@ -299,7 +318,7 @@ function CancelJobButton({
         if (cancelling) return;
         if (
           !window.confirm(
-            `Cancel job ${jobId}? Pending tasks are killed immediately; running tasks are stopped best-effort. This cannot be undone.`
+            `Cancel job ${jobId}? Pending tasks are killed immediately; running tasks are stopped best-effort. This cannot be undone.`,
           )
         ) {
           return;
@@ -357,11 +376,11 @@ export default function JobsTable({
   facets = {},
   onToggleFacet,
   emptyMessage = "no jobs found",
-  onToggleHidden,
+  onDeleteJob,
   onCancelJob,
 }: JobsTableProps) {
   const navigate = useNavigate();
-  const showActionColumn = Boolean(onToggleHidden || onCancelJob);
+  const showActionColumn = Boolean(onDeleteJob || onCancelJob);
 
   if (jobs.length === 0) {
     return (
@@ -395,25 +414,30 @@ export default function JobsTable({
           {jobs.map(
             (
               { job_id, name, workpool_id, metadata, created_at, tasks, state },
-              i
+              i,
             ) => {
               const submitDate = new Date(created_at);
               const cc = workpool_id ? workerPoolColor(workpool_id) : null;
-              const hidden = metadata?.hidden === "true";
+              const deleted = state === DELETED_JOB_STATE;
               const cancellable = Boolean(
-                state && !TERMINAL_JOB_STATES.has(state)
+                state && !TERMINAL_JOB_STATES.has(state),
               );
               return (
                 <tr
                   key={job_id}
-                  className="jt-tr"
+                  className={deleted ? "jt-tr jt-tr-deleted" : "jt-tr"}
                   onClick={() => navigate(`/jobs/${job_id}`)}
                 >
                   <td className="jt-td jt-td-index">
                     {String(i + 1).padStart(2, "0")}
                   </td>
                   <td className="jt-td">
-                    <div className="jt-id">{name || job_id}</div>
+                    <div className="jt-id">
+                      {name || job_id}
+                      {deleted && (
+                        <span className="jt-deleted-tag">deleted</span>
+                      )}
+                    </div>
                     <LabelChips
                       metadata={metadata}
                       search={search}
@@ -467,11 +491,10 @@ export default function JobsTable({
                             onCancelJob={onCancelJob}
                           />
                         )}
-                        {onToggleHidden && (
-                          <HideJobButton
+                        {onDeleteJob && canDeleteJob(state) && (
+                          <DeleteJobButton
                             jobId={job_id}
-                            hidden={hidden}
-                            onToggleHidden={onToggleHidden}
+                            onDeleteJob={onDeleteJob}
                           />
                         )}
                       </div>
@@ -479,7 +502,7 @@ export default function JobsTable({
                   )}
                 </tr>
               );
-            }
+            },
           )}
         </tbody>
       </table>
@@ -515,6 +538,21 @@ const styles = `
   .jt-th-action { width: 3.5rem; }
 
   .jt-tr { cursor: pointer; }
+
+  /* Deleted jobs only appear when "Show deleted jobs" is checked. */
+  .jt-tr-deleted .jt-td { opacity: 0.55; }
+  .jt-deleted-tag {
+    margin-left: 0.5rem;
+    padding: 0 0.35rem;
+    border: 1px solid #c62828;
+    border-radius: 3px;
+    color: #c62828;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
 
   .jt-td {
     padding: 0.65rem 0.5rem;

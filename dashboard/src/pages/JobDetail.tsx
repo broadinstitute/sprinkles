@@ -20,6 +20,7 @@ import type {
   TaskSummaryRecord,
 } from "../types";
 import { apiFetch } from "../api/client";
+import { DELETED_JOB_STATE, TERMINAL_JOB_STATES } from "../data/jobStates";
 import WorkPoolSummaryCard, {
   useWorkpoolSummary,
 } from "../components/WorkPoolSummaryCard";
@@ -39,11 +40,7 @@ const HIDDEN_LABEL_KEYS = new Set([
   "UUID",
   "job-env-sha256",
   "job-spec-sha256",
-  "hidden",
 ]);
-
-// Mirrors monitor.IsTerminalJobStatus on the Go side.
-const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
 
 const MONO = "'IBM Plex Mono', monospace";
 
@@ -406,7 +403,7 @@ function RetryJobButton({ jobId }: { jobId: string }) {
 export default function JobDetail() {
   const { jobId } = useParams<{ jobId: string }>();
   const location = useLocation();
-  const { addJobEventListener, jobCache } = useEvents();
+  const { addJobEventListener, jobCache, jobs } = useEvents();
   const [localEvents, setLocalEvents] = useState<AnyEvent[]>([]);
 
   const isTasksTab = location.pathname.endsWith("/tasks");
@@ -423,10 +420,12 @@ export default function JobDetail() {
   const workpoolJobCount = useMemo(
     () =>
       jobWorkpoolId
-        ? Object.values(jobCache).filter((j) => j.workpool_id === jobWorkpoolId)
-            .length
+        ? jobs.filter(
+            (j) =>
+              j.workpool_id === jobWorkpoolId && j.state !== DELETED_JOB_STATE,
+          ).length
         : 0,
-    [jobCache, jobWorkpoolId],
+    [jobs, jobWorkpoolId],
   );
 
   // Events are only used for the tasks tab (per-task status + attempt counts).
@@ -549,6 +548,7 @@ export default function JobDetail() {
       : null;
 
   const isTerminalJob = TERMINAL_JOB_STATES.has(jobSummary?.state ?? "");
+  const isDeletedJob = jobSummary?.state === DELETED_JOB_STATE;
   const jobLastUpdatedMs = jobSummary?.last_updated
     ? new Date(jobSummary.last_updated).getTime()
     : null;
@@ -568,7 +568,25 @@ export default function JobDetail() {
         <div style={{ marginTop: 4, fontSize: "0.8rem", color: "#999" }}>
           {jobId}
         </div>
-        <RetryJobButton jobId={jobId} />
+        {isDeletedJob ? (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "6px 10px",
+              display: "inline-block",
+              border: "1px solid #ef9a9a",
+              borderRadius: 4,
+              background: "#ffebee",
+              color: "#b71c1c",
+              fontSize: "0.8rem",
+            }}
+          >
+            This job has been deleted. It no longer appears in the job list and
+            cannot be retried.
+          </div>
+        ) : (
+          <RetryJobButton jobId={jobId} />
+        )}
       </div>
 
       <FailureBanner

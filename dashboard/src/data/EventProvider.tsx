@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { AnyEvent, BackendJobSummary, JobDetail } from "../types";
 import { apiFetch } from "../api/client";
+import { DELETED_JOB_STATE } from "./jobStates";
 
 const POLL_INTERVAL_MS = 5_000;
 const PAGE_LIMIT = 1000;
@@ -30,17 +31,10 @@ export interface EventContextValue {
   paused: boolean;
   setPaused: (paused: boolean) => void;
   lastUpdatedAt: number | null;
-  /** Writes a job's label list straight into jobCache (deriving `metadata`
-   * from it) without a round-trip -- the poll loop below only ever fetches
-   * each job's details once (pendingJobFetchesRef dedup), so callers that
-   * mutate a job's labels out-of-band (e.g. toggling "hidden") already know
-   * the resulting label list (either optimistically, or from the mutation
-   * endpoint's response) and can push it straight in for an immediate,
-   * flicker-free update instead of waiting on a fresh GET. Creates a stub
-   * cache entry (blank name/created_at/etc., filled in later by a real
-   * fetch) if the job's details haven't been fetched yet, so this always
-   * takes effect even if e.g. polling is paused. */
-  updateJobLabels: (jobId: string, labels: JobDetail["labels"]) => void;
+  /** Marks a job as deleted in the local job list, right after a successful
+   * DELETE /api/v1/job/{job_id}, so it drops out of the default list without
+   * waiting for the next poll (which will report the same state). */
+  markJobDeleted: (jobId: string) => void;
 }
 
 const EventContext = createContext<EventContextValue>({
@@ -50,7 +44,7 @@ const EventContext = createContext<EventContextValue>({
   paused: false,
   setPaused: () => {},
   lastUpdatedAt: null,
-  updateJobLabels: () => {},
+  markJobDeleted: () => {},
 });
 
 interface RawJobDetail {
@@ -116,32 +110,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const updateJobLabels = useMemo(
-    () => (jobId: string, labels: JobDetail["labels"]) => {
-      setJobCache((prev) => {
-        const existing = prev[jobId];
-        const metadata = Object.fromEntries(
-          labels.map((l) => [l.name, l.value])
-        );
-        // If this job's details haven't been fetched yet (e.g. polling is
-        // paused, so the poll loop's one-time per-job fetch never ran),
-        // stub in the fields we don't know rather than silently dropping
-        // the update -- name/created_at/etc. get filled in for real the
-        // next time fetchJobDetail runs; callers (JobsTable) only read
-        // `metadata` and tolerate a blank `name` by falling back to the ID.
-        const detail: JobDetail = existing
-          ? { ...existing, labels, metadata }
-          : {
-              job_id: jobId,
-              name: "",
-              workpool_id: "",
-              created_at: "",
-              task_count: 0,
-              labels,
-              metadata,
-            };
-        return { ...prev, [jobId]: detail };
-      });
+  const markJobDeleted = useMemo(
+    () => (jobId: string) => {
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.job_id === jobId ? { ...j, state: DELETED_JOB_STATE } : j
+        )
+      );
     },
     []
   );
@@ -286,7 +261,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       paused,
       setPaused,
       lastUpdatedAt,
-      updateJobLabels,
+      markJobDeleted,
     }),
     [
       jobs,
@@ -294,7 +269,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       jobCache,
       paused,
       lastUpdatedAt,
-      updateJobLabels,
+      markJobDeleted,
     ]
   );
 

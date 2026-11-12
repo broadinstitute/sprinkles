@@ -6,6 +6,7 @@ import TabBar from "../components/TabBar";
 import { RangeRefreshBar } from "../components/RefreshControls";
 import type { RangeChange } from "../components/RefreshControls";
 import JobsTable from "../components/JobsTable";
+import { DELETED_JOB_STATE } from "../data/jobStates";
 import type { JobsTableRow } from "../components/JobsTable";
 import EventsPanel from "../components/EventsPanel";
 import { apiFetch } from "../api/client";
@@ -1200,13 +1201,18 @@ function BatchesTab({ workpoolId }: { workpoolId: string }) {
 function JobsTab({ workpoolId }: { workpoolId: string }) {
   const jobs = useJobs(workpoolId, true);
 
-  const rows: JobsTableRow[] = jobs.map((j) => ({
-    job_id: j.job_id,
-    workpool_id: j.workpool_id,
-    created_at: j.created_at,
-    tasks: j.tasks,
-    metadata: Object.fromEntries(j.labels.map((l) => [l.name, l.value])),
-  }));
+  // Deleted jobs are removed from job lists (see the main job list's "Show
+  // deleted jobs"); this tab has no such toggle, so just leave them out.
+  const rows: JobsTableRow[] = jobs
+    .filter((j) => j.state !== DELETED_JOB_STATE)
+    .map((j) => ({
+      job_id: j.job_id,
+      workpool_id: j.workpool_id,
+      created_at: j.created_at,
+      tasks: j.tasks,
+      state: j.state,
+      metadata: Object.fromEntries(j.labels.map((l) => [l.name, l.value])),
+    }));
 
   return <JobsTable jobs={rows} emptyMessage="No jobs found." />;
 }

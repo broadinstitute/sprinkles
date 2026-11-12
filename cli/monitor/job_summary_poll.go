@@ -7,9 +7,10 @@ import (
 )
 
 // runJobSummaryPoll updates JobSummary for every job that is not yet in a
-// terminal state. For each job it counts tasks by status, recomputes the job
-// status, writes a history snapshot, and — on first transition to terminal —
-// publishes a JobTerminatedEvent.
+// terminal state (deleted jobs are terminal, so they are never revisited). For
+// each job it counts tasks by status, recomputes the job status, writes a
+// history snapshot, and — on first transition to terminal — publishes a
+// JobTerminatedEvent.
 func (a *Monitor) runJobSummaryPoll(ctx context.Context) error {
 	summaries, err := a.jobSummaries.ListNonTerminal(ctx)
 	if err != nil {
@@ -42,11 +43,22 @@ func (a *Monitor) reviveJobSummary(ctx context.Context, jobID string) error {
 	if summary == nil || !IsTerminalJobStatus(summary.State) {
 		return nil
 	}
+	if summary.State == JobStatusDeleted {
+		// Deleted is final. A job_created event for a deleted job (e.g. a
+		// retry that raced the delete) must not bring it back.
+		log.Printf("job summary: ignoring job_created for deleted job %s", jobID)
+		return nil
+	}
 	summary.Expiry = time.Now().Add(7 * 24 * time.Hour)
 	return a.updateJobSummary(ctx, summary)
 }
 
 func (a *Monitor) updateJobSummary(ctx context.Context, summary *JobSummary) error {
+	// The state computed below comes from task counts and can never be
+	// deleted, so recomputing a deleted job would silently undelete it.
+	if summary.State == JobStatusDeleted {
+		return nil
+	}
 	counts, err := a.tasks.CountByJob(ctx, summary.JobID)
 	if err != nil {
 		return err

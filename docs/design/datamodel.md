@@ -24,13 +24,14 @@ One document per submitted job. The document ID is the `job_id`.
 | `labels`      | []Label         | User-defined key/value tags. Set at submission time, but mutable afterward — see below.                                |
 | `result_path` | string          | GCS prefix that identifies the job: defaults to `<SprinklesConfig.gcs_prefix>/<name>`, or the submitted `resultPath`. Task result paths nest under it (`<result_path>/<task_index>`). The monitor writes `job_summary.json` here when the job reaches a terminal state. A submission whose `result_path` matches a live job is a **retry** of that job (see below). |
 
-**Retry.** `POST /api/v1/job` with the same `result_path` as an unexpired job (same task count and per-task commands, else `409`) retries that job instead of creating a new one, as does `POST /api/v1/job/{job_id}/retry`: `error`/`failed`/`killed` tasks go back to `pending`, `success`/`pending`/in-flight tasks are untouched, `job_summary.json` is deleted from GCS, expiry of the job and its tasks is extended by 7 days, and a `job_created` event is published. On that event the **monitor** recomputes the job's `JobSummary` if it is terminal (extending its expiry), which is what brings a retried job's summary back to non-terminal; the retry itself never writes `JobSummary`. The event is not durable, so a missed event leaves the summary stale. If no live job matches, a new job is created, and workers skip any task whose `task_summary.json` already reports success (see `Tasks`).
+**Retry.** `POST /api/v1/job` with the same `result_path` as an unexpired, undeleted job (same task count and per-task commands, else `409`) retries that job instead of creating a new one, as does `POST /api/v1/job/{job_id}/retry`: `error`/`failed`/`killed` tasks go back to `pending`, `success`/`pending`/in-flight tasks are untouched, `job_summary.json` is deleted from GCS, expiry of the job and its tasks is extended by 7 days, and a `job_created` event is published. On that event the **monitor** recomputes the job's `JobSummary` if it is terminal (extending its expiry), which is what brings a retried job's summary back to non-terminal; the retry itself never writes `JobSummary`. The event is not durable, so a missed event leaves the summary stale. A deleted job (see **Deleting a job** below) is never matched and can't be retried: resubmitting its name creates a new job. If no live job matches, a new job is created, and workers skip any task whose `task_summary.json` already reports success (see `Tasks`).
 
 **Labels are mutable after submission.** `POST /api/v1/job/{job_id}/labels` (`handleUpdateJobLabels` in `cli/dev/dashboard_backend.go`) lets a caller add/overwrite (`set`) or delete (`remove`) labels on an existing job, inside a single Firestore transaction that updates both `Jobs.labels` and, if it exists, `JobSummary.labels` (see below) to match. This is the one exception to `Jobs` being otherwise write-once at submission, and to `JobSummary` being written only by submit-at-creation and the monitor thereafter. A label edit does **not** produce a `JobSummaryHistory` snapshot.
 
-Two label names are reserved by convention (not first-class fields):
+**Deleting a job.** `DELETE /api/v1/job/{job_id}` moves a job to the `deleted` state (see `JobSummary.state` below), which removes it from the dashboard's default job list ("Show deleted jobs" brings it back into view). It is allowed only for a job that has already finished on its own (`success`, `error`, `failed` or `killed`) and has no pending or in-flight tasks; anything else is a `409`. Deleting is final: there is no transition out of `deleted`, retry is refused, and the monitor never recomputes a deleted summary. Only `JobSummary.state` changes; the `Jobs` document, tasks and GCS outputs stay until they expire. This replaces the earlier `hidden=true` label convention.
 
-- `hidden=true` — interpreted by the dashboard UI to exclude the job from the default job list ("hide/show jobs").
+One label name is reserved by convention (not a first-class field):
+
 - `user=<name>` — auto-attached at submission time from the caller's `APIKeys` record (see [`APIKeys`](#apikeys) below), identifying who submitted the job.
 
 **ResourceEntry** (embedded object):
@@ -525,7 +526,7 @@ Bytes rather than gigabytes so the fields stay integers: Firestore's `DataTo` re
 
 ### `JobSummary`
 
-One document per job, keyed by `job_id`. This is the **mutable** counterpart to the immutable `Jobs` document: a `Job` is written once at submission and never updated; all evolving state lives here. The **submit** path creates the initial `JobSummary` (with `state=pending`) at job submission time. After that, the `JobSummary` is maintained exclusively by the **monitor** process, which recomputes it whenever task states change. No process other than submit (at creation) and the monitor (thereafter) should write to this collection.
+One document per job, keyed by `job_id`. This is the **mutable** counterpart to the immutable `Jobs` document: a `Job` is written once at submission and never updated; all evolving state lives here. The **submit** path creates the initial `JobSummary` (with `state=pending`) at job submission time. After that, the `JobSummary` is maintained by the **monitor** process, which recomputes it whenever task states change. The one other writer is the delete endpoint, which sets `state=deleted` (see **Deleting a job** under `Jobs`); the monitor leaves a deleted summary alone. No other process should write to this collection.
 
 Any question about job progress — "is this job still running?", "how many tasks failed?" — should be answered by reading `JobSummary`, not by scanning `Tasks` or adding derived fields to `Jobs`.
 
@@ -560,6 +561,9 @@ Any question about job progress — "is this job still running?", "how many task
 | `success`                  | All tasks complete; every terminal task reached `success`                                 |
 | `error`                    | All tasks complete; at least one task is in `error` state, none in `failed`               |
 | `failed`                   | All tasks complete; at least one task is in `failed` state                                |
+| `deleted`                  | Explicitly deleted by a user. Set only by the delete endpoint, never computed from tasks   |
+
+`deleted` is **terminal and final**. A job may become `deleted` only from `success`, `error`, `failed` or `killed` (and only while it has no pending or in-flight tasks); there is no transition out of it. The monitor's job summary poll reads only non-terminal summaries, ignores a `job_created` event for a deleted job (so a retry can't resurrect it), and never recomputes it. Code that treats "terminal" as "finished" should include `deleted` (`monitor.IsTerminalJobStatus` does); code that asks "may this be deleted?" uses `monitor.CanDeleteJob`.
 
 ---
 
@@ -665,7 +669,7 @@ expired without a clean shutdown — see the `Workers` collection and the
 
 The monitor subscribes to this topic via the `monitor-events-in` subscription and triggers an immediate provisioning poll on `job_created` receipt, rather than waiting for the next timer tick.
 
-**JobTerminatedEvent** — published by the monitor when all tasks in a job have reached a terminal state (`success`, `error`, `failed`, or `killed`). This event signals that the job is done; it does not indicate whether the job succeeded or failed — consumers should query `JobSummary` for that.
+**JobTerminatedEvent** — published by the monitor when all tasks in a job have reached a terminal state (`success`, `error`, `failed`, or `killed`; `deleted` is applied later, by the delete endpoint, and publishes nothing). This event signals that the job is done; it does not indicate whether the job succeeded or failed — consumers should query `JobSummary` for that.
 
 ```json
 {

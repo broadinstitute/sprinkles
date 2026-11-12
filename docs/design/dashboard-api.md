@@ -411,7 +411,7 @@ List job summaries with optional time range filtering. Summaries are read from t
     "workpool_id": "string",
     "name": "string",
     "created_at": "RFC3339 timestamp",
-    "state": "string (pending | in_progress | in_progress_with_error | in_progress_with_failure | success | error | failed | killed)",
+    "state": "string (pending | in_progress | in_progress_with_error | in_progress_with_failure | success | error | failed | killed | deleted)",
     "tasks": [{ "state": "string", "count": "integer" }],
     "labels": [{ "name": "string", "value": "string" }],
     "expiry": "RFC3339 timestamp",
@@ -421,6 +421,8 @@ List job summaries with optional time range filtering. Summaries are read from t
 ```
 
 **Errors**: `400 BAD_REQUEST` for a malformed `after`/`before` timestamp.
+
+Deleted jobs (`state` = `deleted`) are returned like any other; it is up to the client to hide them (the dashboard does, unless "Show deleted jobs" is checked).
 
 **Firestore**: `JobSummary` — filter by `workpool_id` if provided; filter by `created_at` range when `after`/`before` are supplied. When `workpool_id` is provided, the server-side `ORDER BY created_at` is skipped (to avoid requiring a composite index) and results are instead sorted client-side, on the assumption that a single workpool's job list is small.
 
@@ -516,6 +518,32 @@ Calling this on a job with no pending tasks (e.g. already fully running, or alre
 
 ---
 
+### `DELETE /api/v1/job/{job_id}`
+
+Delete a job: move it to the `deleted` state, which takes it out of the default job list. Only a job that has already finished on its own can be deleted, and deleting is permanent — a deleted job can't be retried or brought back.
+
+**Path parameters**: `job_id` — required. **Request body**: none.
+
+**Response** `200 OK`:
+
+```json
+{ "job_id": "string", "state": "deleted" }
+```
+
+Idempotent: deleting an already-deleted job returns `200` with the same body.
+
+**Errors**:
+
+- `404 NOT_FOUND` if the job (its `JobSummary`) doesn't exist.
+- `409 CONFLICT` if the job isn't deletable: its state is not `success`, `error`, `failed` or `killed` (cancel it and wait for it to finish first), or — because the summary only catches up with a retry once the monitor revives it — any of its tasks is still `pending`, `claimed`, `running` or `writing`. The message says which. Nothing is changed.
+- `500 INTERNAL_ERROR` on a Firestore failure.
+
+**Firestore**: one transaction on `JobSummary/{job_id}`: reads the summary, checks `state` (`monitor.CanDeleteJob`), queries `Tasks` (`job_id == {job_id} && status in (pending, claimed, running, writing)`, limit 1), and sets `state = deleted`. Nothing else is written: the `Jobs` document, the tasks, the GCS outputs (including `job_summary.json`) and the job's expiry are left as they are. No event is published and no `JobSummaryHistory` snapshot is written. The endpoint works with no monitor running; when one is, it leaves a deleted summary alone.
+
+**Interactions**: `POST /api/v1/job/{job_id}/retry` on a deleted job is a `409`. `POST /api/v1/job` skips deleted jobs when looking for a live job with the same result path, so resubmitting a deleted job's name creates a **new** job (workers will still find and skip tasks whose `task_summary.json` already reports success, since the result path is the same).
+
+---
+
 ### `POST /api/v1/job/{job_id}/retry`
 
 Retry a job: put its `error`, `failed` and `killed` tasks back to `pending` so they run again. `success`, `pending` and in-flight (`claimed`/`running`/`writing`) tasks are never touched, so retrying a running job is safe (it just resets any failed tasks). Also used by `POST /api/v1/job` when a submission matches an existing job.
@@ -530,7 +558,7 @@ Retry a job: put its `error`, `failed` and `killed` tasks back to `pending` so t
 
 `resetTasks` may be 0 (nothing to retry). `warning` is set when tasks were reset but the job's workpool is `halted`, so they won't run until it is reset.
 
-**Errors**: `404 NOT_FOUND` if the job doesn't exist or has expired. `500 INTERNAL_ERROR` on a Firestore/GCS failure. A failure part way is safe to retry: repeating the call resets whatever is left.
+**Errors**: `404 NOT_FOUND` if the job doesn't exist or has expired. `409 CONFLICT` if the job has been deleted (deleted is final; submit the job again to create a new one). `500 INTERNAL_ERROR` on a Firestore/GCS failure. A failure part way is safe to retry: repeating the call resets whatever is left.
 
 **Effects** (only if at least one task needed resetting, unless noted):
 

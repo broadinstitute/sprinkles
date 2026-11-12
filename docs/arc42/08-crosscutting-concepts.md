@@ -16,7 +16,7 @@ Firestore collections and their single owner/writer:
 | `Workers`                        | `worker_id` (UUID)  | worker (create/heartbeat) / monitor (`zombie`)               | primary, `status` |
 | `BatchAPIRequests`               | internal `batch_id` | monitor                                                      | primary, `status` |
 | `WorkPoolSummary` / `...History` | `workpool_id`       | `workpool_summary_poll.go` only                              | derived, `state`  |
-| `JobSummary` / `...History`      | `job_id`            | `job_summary_poll.go` only                                   | derived, `state`  |
+| `JobSummary` / `...History`      | `job_id`            | `job_summary_poll.go` / delete endpoint (`state=deleted`)    | derived, `state`  |
 | `Events`                         | `event_id`          | `EventPublisher` (mirrors `sprinkles-events`)                | append-only       |
 | `TaskLog`                        | —                   | worker (opt-in streaming)                                    | append-only       |
 | `APIKeys`                        | —                   | `dev add-api-key`                                            | auth              |

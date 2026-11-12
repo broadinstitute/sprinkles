@@ -1146,8 +1146,27 @@ func (s *dashboardServer) gcsClient() (*storage.Client, error) {
 	return s.gcs, s.gcsErr
 }
 
-// findLiveJobByResultPath returns the most recently created, unexpired job
-// whose result path is resultPath, or nil if there is none.
+// jobIsDeleted reports whether the job's summary is in the (final) deleted
+// state. A job with no summary isn't deleted.
+func (s *dashboardServer) jobIsDeleted(ctx context.Context, jobID string) (bool, error) {
+	snap, err := s.fs.Collection("JobSummary").Doc(jobID).Get(ctx)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	state, err := snap.DataAt("state")
+	if err != nil {
+		return false, nil
+	}
+	return state == string(monitor.JobStatusDeleted), nil
+}
+
+// findLiveJobByResultPath returns the most recently created, unexpired,
+// undeleted job whose result path is resultPath, or nil if there is none. A
+// deleted job is skipped so that resubmitting its name starts a fresh job
+// rather than trying to retry one that can never come back.
 func (s *dashboardServer) findLiveJobByResultPath(ctx context.Context, resultPath string) (*sprinkles.Job, error) {
 	iter := s.fs.Collection(sprinkles.JobCollection).Where("result_path", "==", resultPath).Documents(ctx)
 	defer iter.Stop()
@@ -1169,10 +1188,18 @@ func (s *dashboardServer) findLiveJobByResultPath(ctx context.Context, resultPat
 		if !job.Expiry.After(now) {
 			continue
 		}
-		if best == nil || job.CreatedAt.After(best.CreatedAt) {
-			j := job
-			best = &j
+		if best != nil && !job.CreatedAt.After(best.CreatedAt) {
+			continue
 		}
+		deleted, err := s.jobIsDeleted(ctx, job.JobID)
+		if err != nil {
+			return nil, err
+		}
+		if deleted {
+			continue
+		}
+		j := job
+		best = &j
 	}
 }
 
@@ -1284,6 +1311,14 @@ func (s *dashboardServer) handleRetryJob(w http.ResponseWriter, r *http.Request)
 	}
 	if !job.Expiry.After(time.Now()) {
 		writeError(w, http.StatusNotFound, "NOT_FOUND", "job has expired")
+		return
+	}
+	if deleted, err := s.jobIsDeleted(ctx, jobID); err != nil {
+		log.Printf("dashboard: RetryJob checking deleted %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to check job state")
+		return
+	} else if deleted {
+		writeError(w, http.StatusConflict, "CONFLICT", "job has been deleted and cannot be retried; submit it again to create a new job")
 		return
 	}
 	resp, err := s.retryJob(ctx, &job)
@@ -1591,6 +1626,83 @@ func (s *dashboardServer) handleCancelJob(w http.ResponseWriter, r *http.Request
 		"job_id":               jobID,
 		"killed_pending_tasks": killedPending,
 	})
+}
+
+// ----- DELETE /api/v1/job/{job_id} -----
+
+type deleteJobResponse struct {
+	JobID string `json:"job_id"`
+	State string `json:"state"`
+}
+
+// handleDeleteJob moves a job to the (final) deleted state, which removes it
+// from the default job list. It is allowed only for a job that has already
+// reached a terminal state on its own (success, error, failed or killed): a
+// job that is pending or in progress must be cancelled and finish first. It is
+// idempotent for an already-deleted job, and there is no way back from
+// deleted. Nothing but the job's JobSummary state changes: the job, tasks and
+// any GCS outputs are left in place until they expire.
+//
+// JobSummary.state is otherwise written only by the monitor, which leaves a
+// deleted summary alone (see monitor.JobStatusDeleted), so this works with no
+// monitor running.
+func (s *dashboardServer) handleDeleteJob(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	jobID := r.PathValue("job_id")
+	summaryDoc := s.fs.Collection("JobSummary").Doc(jobID)
+
+	var conflict string
+	err := s.fs.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		conflict = "" // the transaction function may be re-run
+		snap, err := tx.Get(summaryDoc)
+		if err != nil {
+			return err
+		}
+		var js monitor.JobSummary
+		if err := snap.DataTo(&js); err != nil {
+			return err
+		}
+		if js.State == monitor.JobStatusDeleted {
+			return nil // already deleted: nothing to do
+		}
+		if !monitor.CanDeleteJob(js.State) {
+			conflict = fmt.Sprintf("job is %s; only a job that has finished (success, error, failed or killed) can be deleted. Cancel it and wait for it to finish first", js.State)
+			return nil
+		}
+		// The summary only catches up with a retry once the monitor has
+		// revived it, so also refuse while any task is pending or in flight.
+		// Otherwise a job whose retry has just reset its tasks could be
+		// deleted while still running.
+		active := s.fs.Collection(sprinkles.TaskCollection).
+			Where("job_id", "==", jobID).
+			Where("status", "in", []any{sprinkles.StatusPending, sprinkles.StatusClaimed, sprinkles.StatusRunning, sprinkles.StatusWriting}).
+			Limit(1)
+		iter := tx.Documents(active)
+		_, err = iter.Next()
+		iter.Stop()
+		if err == nil {
+			conflict = "job still has pending or running tasks (a retry may be in progress); cancel it and wait for it to finish before deleting"
+			return nil
+		}
+		if err != iterator.Done {
+			return err
+		}
+		return tx.Update(summaryDoc, []firestore.Update{{Path: "state", Value: string(monitor.JobStatusDeleted)}})
+	})
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "job not found")
+			return
+		}
+		log.Printf("dashboard: DeleteJob %s: %v", jobID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to delete job")
+		return
+	}
+	if conflict != "" {
+		writeError(w, http.StatusConflict, "CONFLICT", conflict)
+		return
+	}
+	writeJSON(w, http.StatusOK, deleteJobResponse{JobID: jobID, State: string(monitor.JobStatusDeleted)})
 }
 
 // ----- GET /api/v1/job/{job_id}/summary -----
@@ -2540,6 +2652,7 @@ func NewDashboardHandler(
 	handle("POST /api/v1/job/{job_id}/labels", srv.handleUpdateJobLabels)
 	handle("POST /api/v1/job/{job_id}/cancel", srv.handleCancelJob)
 	handle("POST /api/v1/job/{job_id}/retry", srv.handleRetryJob)
+	handle("DELETE /api/v1/job/{job_id}", srv.handleDeleteJob)
 	handle("GET /api/v1/job/{job_id}/summary", srv.handleGetJobSummary)
 	handle("GET /api/v1/job/{job_id}/summary-history", srv.handleGetJobSummaryHistory)
 	handle("GET /api/v1/job/{job_id}/tasks", srv.handleGetJobTasks)

@@ -54,6 +54,8 @@ If no live job matches, a new job is created as usual. Avoiding repeated work th
 - The worker's `task_summary.json` is `{"exit_code": <int>, "finished_at": "<RFC3339>"}`. If the container was killed or the docker command failed without an exit code (an infrastructure failure), nothing is written.
 - New state transitions: `claimed` → `success` (prior result found) and `error`/`failed`/`killed` → `pending` (retry). Both are documented in `datamodel.md`.
 
+A **deleted** job (`JobSummary.state = deleted`; see `datamodel.md`) is never retried. Both entry points refuse it before anything is reset: `POST /api/v1/job/{job_id}/retry` returns `409`, and `POST /api/v1/job` ignores deleted jobs when looking for a live job with the same result path, so the same submission creates a **new** job instead (which then finds and skips any tasks whose `task_summary.json` already reports success). This is what makes "delete" mean something different from "hide": it cannot be undone, and resubmitting never revives it.
+
 ### `retryJob`, in order
 
 1. List the job's tasks and select those in `error`, `failed` or `killed`.
@@ -79,6 +81,7 @@ The dashboard backend creates its GCS client lazily on first retry, so it can ru
 | Phase 2 is done by the worker, per task | Smallest change; reuses the normal claim/execute path. The cost is that a VM may be provisioned just to discover no work is needed. Short-circuiting whole completed jobs at submit is a possible later optimisation (using `job_summary.json`). |
 | Phase 2 always creates a new job and new ID | There is no old record to reuse. The work avoidance is at task granularity. |
 | Retry resets `killed` as well as `error`/`failed` | Resubmitting a job you killed should bring it back to life. There is no "recently killed" guard. |
+| Deleted jobs are never retried or matched by resubmission | Deleting is final. A resubmission after a delete starts a fresh job rather than reviving the one the user removed, and the delete endpoint's task check means a job can't be deleted while a retry's tasks are still pending. |
 | No force-rerun flag | To rerun everything, kill the job and delete its GCS files. Keeps the API small; the destructive step is explicit. |
 | Compatibility check is only task count + commands, and only on retry | Cheap and catches the obvious mistake (a different job with the same name). Anything finer-grained is the submitter's problem. |
 | Success is recorded as an exit code, not a status word | One simple, unambiguous rule, and the file also records failures. |

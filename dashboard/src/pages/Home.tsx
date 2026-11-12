@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
 import { useVersion } from "../data/useVersion";
+import { TERMINAL_JOB_STATES } from "../data/jobStates";
 import { apiFetch } from "../api/client";
 import type { WorkPoolListEntry } from "../types";
 
-const TERMINAL_JOB_STATES = new Set(["success", "error", "failed", "killed"]);
 const POLL_INTERVAL_MS = 30_000;
 
 function useWorkPools(): WorkPoolListEntry[] | undefined {

@@ -29,7 +29,7 @@ paths:
           description: Invalid input
         "409":
           description: |-
-            A live job with the same result path already exists, but the
+            A live (unexpired, undeleted) job with the same result path already exists, but the
             submission has a different number of tasks or different task
             commands. A submission whose tasks match is retried instead; see
             SubmitJobResponse.
@@ -110,7 +110,8 @@ components:
           description: |-
             Optional GCS "directory" prefix (a gs:// URL). Defaults to
             `<gcs_prefix>/<name>`. It is the job's identity: submitting a job
-            whose result path matches a live job retries that job. Task result
+            whose result path matches a live, undeleted job retries that job (a deleted
+            job is never matched, so a new job is created). Task result
             paths default to `<resultPath>/<task index>`, and once every task
             reaches a terminal state the monitor writes a job_summary.json file
             under it containing the job, its tasks, and its workpool. Stored as
