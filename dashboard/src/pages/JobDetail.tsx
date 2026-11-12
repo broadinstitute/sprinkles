@@ -47,6 +47,9 @@ const MONO = "'IBM Plex Mono', monospace";
 // Max number of example failed tasks linked from the failure banner.
 const MAX_FAILURE_EXAMPLES = 5;
 
+// Max number of in-flight tasks linked from the running-tasks banner.
+const MAX_RUNNING_EXAMPLES = 5;
+
 function DetailRow({
   label,
   value,
@@ -266,6 +269,57 @@ function FailureBanner({
   );
 }
 
+// Banner shown while tasks are in flight (claimed/running/writing), linking
+// to the log tab for up to MAX_RUNNING_EXAMPLES of them so live output can be
+// inspected without hunting through the Tasks tab.
+function RunningBanner({
+  jobId,
+  runningTasks,
+  runningCount,
+}: {
+  jobId: string;
+  runningTasks: { taskId: string; taskIndex: number }[];
+  runningCount: number;
+}) {
+  if (runningCount === 0) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "baseline",
+        flexWrap: "wrap",
+        gap: 6,
+        padding: "9px 14px",
+        marginBottom: "1rem",
+        background: STATUS_COLORS.running.bg,
+        border: "1.5px solid #d1b3dc",
+        borderRadius: 6,
+        fontSize: "0.8rem",
+        fontFamily: MONO,
+        color: STATUS_COLORS.running.text,
+      }}
+    >
+      <span style={{ fontWeight: 700 }}>
+        ▶ {runningCount} task{runningCount !== 1 ? "s" : ""} in progress.
+      </span>
+      <span style={{ color: "#555" }}>Output of running tasks:</span>
+      {runningTasks.map((t, i) => (
+        <span key={t.taskId}>
+          <Link
+            to={`/jobs/${jobId}/tasks/${t.taskId}/log`}
+            style={{ color: "#1565c0", textDecoration: "none" }}
+          >
+            Task {t.taskIndex}
+          </Link>
+          {i < runningTasks.length - 1 && (
+            <span style={{ color: "#aaa" }}>, </span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function useJobSummary(
   jobId: string | undefined,
   active: boolean,
@@ -465,6 +519,18 @@ export default function JobDetail() {
     [tasks],
   );
 
+  // In-flight tasks, with actually-running ones listed ahead of tasks that are
+  // still being staged (claimed) so the first links have output to show.
+  const inFlightTasks = useMemo(() => {
+    const rank = (s: TaskStatus) =>
+      s === "running" ? 0 : s === "writing" ? 1 : 2;
+    return tasks
+      .filter((t) => ["claimed", "running", "writing"].includes(t.status))
+      .sort(
+        (a, b) => rank(a.status) - rank(b.status) || a.taskIndex - b.taskIndex,
+      );
+  }, [tasks]);
+
   const jobSummary = useJobSummary(jobId, overviewActive);
   const { history: fullSummaryHistory, lastUpdatedAt } = useJobSummaryHistory(
     jobId,
@@ -593,6 +659,12 @@ export default function JobDetail() {
         jobId={jobId}
         failedTasks={erroredTasks.slice(0, MAX_FAILURE_EXAMPLES)}
         failedCount={erroredTasks.length}
+      />
+
+      <RunningBanner
+        jobId={jobId}
+        runningTasks={inFlightTasks.slice(0, MAX_RUNNING_EXAMPLES)}
+        runningCount={inFlightTasks.length}
       />
 
       <TabBar tabs={jobTabs} />
