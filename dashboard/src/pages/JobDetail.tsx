@@ -20,6 +20,9 @@ import type {
   TaskSummaryRecord,
 } from "../types";
 import { apiFetch } from "../api/client";
+import WorkPoolSummaryCard, {
+  useWorkpoolSummary,
+} from "../components/WorkPoolSummaryCard";
 
 const STATUS_COLORS: Record<TaskStatus, { bg: string; text: string }> = {
   pending: { bg: "#e3f2fd", text: "#1565c0" },
@@ -116,16 +119,15 @@ function JobDetailsPanel({
   const dash = <span style={{ color: "#ccc" }}>—</span>;
   const labels = jobDetail?.metadata
     ? Object.entries(jobDetail.metadata).filter(
-        ([k]) => !HIDDEN_LABEL_KEYS.has(k)
+        ([k]) => !HIDDEN_LABEL_KEYS.has(k),
       )
     : [];
-  const clusterId = jobDetail?.workpool_id;
 
   return (
     <div
       style={{
-        width: 280,
-        flexShrink: 0,
+        boxSizing: "border-box",
+        width: "100%",
         background: "#f8f9fa",
         border: "1px solid #e0e0e0",
         borderRadius: 8,
@@ -152,7 +154,7 @@ function JobDetailsPanel({
               </span>
             }
           />
-        ) : null
+        ) : null,
       )}
       {ratePerMin > 0 && (
         <>
@@ -184,22 +186,6 @@ function JobDetailsPanel({
         label="tasks"
         value={jobDetail ? jobDetail.task_count : dash}
       />
-      <DetailRow
-        label="work pool"
-        value={
-          clusterId ? (
-            <Link
-              to={`/workpools/${clusterId}`}
-              style={{ color: "#1565c0", textDecoration: "none" }}
-            >
-              {clusterId}
-            </Link>
-          ) : (
-            dash
-          )
-        }
-      />
-
       {labels.length > 0 && (
         <>
           <SectionHeader>Labels</SectionHeader>
@@ -285,7 +271,7 @@ function FailureBanner({
 
 function useJobSummary(
   jobId: string | undefined,
-  active: boolean
+  active: boolean,
 ): BackendJobSummary | undefined {
   const [summary, setSummary] = useState<BackendJobSummary | undefined>();
   useEffect(() => {
@@ -297,13 +283,15 @@ function useJobSummary(
         if (!r.ok || cancelled) return;
         const raw = await r.json();
         if (cancelled) return;
-        const taskCount = (raw.tasks as {
-          state: string;
-          count: number;
-        }[]).reduce((s, t) => s + t.count, 0);
+        const taskCount = (
+          raw.tasks as {
+            state: string;
+            count: number;
+          }[]
+        ).reduce((s, t) => s + t.count, 0);
         const successCount =
           (raw.tasks as { state: string; count: number }[]).find(
-            (t) => t.state === "success"
+            (t) => t.state === "success",
           )?.count ?? 0;
         const failureCount = (raw.tasks as { state: string; count: number }[])
           .filter((t) => ["error", "failed", "killed"].includes(t.state))
@@ -348,7 +336,7 @@ function useJobTaskRecords(jobId: string | undefined): TaskSummaryRecord[] {
 
 function useJobSummaryHistory(
   jobId: string | undefined,
-  active: boolean
+  active: boolean,
 ): { history: JobSummaryHistoryEntry[]; lastUpdatedAt: number | null } {
   const [history, setHistory] = useState<JobSummaryHistoryEntry[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -394,7 +382,7 @@ function RetryJobButton({ jobId }: { jobId: string }) {
       const data: { resetTasks?: number; warning?: string } = await r.json();
       setMessage(
         `${data.resetTasks ?? 0} task(s) reset to pending.` +
-          (data.warning ? ` Warning: ${data.warning}` : "")
+          (data.warning ? ` Warning: ${data.warning}` : ""),
       );
     } catch (e) {
       setMessage(`Retry failed: ${e instanceof Error ? e.message : e}`);
@@ -408,7 +396,9 @@ function RetryJobButton({ jobId }: { jobId: string }) {
       <button onClick={retry} disabled={busy}>
         {busy ? "Retrying…" : "Retry failed tasks"}
       </button>
-      {message && <span style={{ marginLeft: 10, color: "#555" }}>{message}</span>}
+      {message && (
+        <span style={{ marginLeft: 10, color: "#555" }}>{message}</span>
+      )}
     </div>
   );
 }
@@ -425,18 +415,31 @@ export default function JobDetail() {
   const [range, setRange] = useState<RangeChange | null>(null);
   const overviewActive =
     !isTasksTab && !isEventsTab && !isSummaryTab && (range?.live ?? true);
+  const jobWorkpoolId = jobId ? jobCache[jobId]?.workpool_id : undefined;
+  const { info: workpoolInfo, activeWorkerCount } = useWorkpoolSummary(
+    jobWorkpoolId,
+    overviewActive,
+  );
+  const workpoolJobCount = useMemo(
+    () =>
+      jobWorkpoolId
+        ? Object.values(jobCache).filter((j) => j.workpool_id === jobWorkpoolId)
+            .length
+        : 0,
+    [jobCache, jobWorkpoolId],
+  );
 
   // Events are only used for the tasks tab (per-task status + attempt counts).
   useEffect(() => {
     if (!jobId) return;
     return addJobEventListener(jobId, (newEvents) =>
-      setLocalEvents((prev) => mergeEvents(prev, newEvents))
+      setLocalEvents((prev) => mergeEvents(prev, newEvents)),
     );
   }, [addJobEventListener, jobId]);
 
   const eventTasks = useMemo(
     () => (jobId ? getJobTasks(localEvents, jobId) : []),
-    [localEvents, jobId]
+    [localEvents, jobId],
   );
   const taskRecords = useJobTaskRecords(jobId);
 
@@ -460,13 +463,13 @@ export default function JobDetail() {
 
   const erroredTasks = useMemo(
     () => tasks.filter((t) => t.status === "error"),
-    [tasks]
+    [tasks],
   );
 
   const jobSummary = useJobSummary(jobId, overviewActive);
   const { history: fullSummaryHistory, lastUpdatedAt } = useJobSummaryHistory(
     jobId,
-    overviewActive
+    overviewActive,
   );
 
   const jobCreatedMs =
@@ -484,7 +487,7 @@ export default function JobDetail() {
 
   const { counts, rates } = useMemo(
     () => computeTimeSeriesFromHistory(summaryHistory),
-    [summaryHistory]
+    [summaryHistory],
   );
 
   const xDomain: [number, number] | undefined = range
@@ -594,16 +597,33 @@ export default function JobDetail() {
           <div
             style={{ display: "flex", gap: "1.5rem", alignItems: "flex-start" }}
           >
-            {/* Left: job details + status */}
-            <JobDetailsPanel
-              jobDetail={jobId ? jobCache[jobId] : undefined}
-              statusCounts={statusCounts}
-              statusOrder={statusOrder}
-              ratePerMin={ratePerMin}
-              etaDate={etaDate}
-              totalTasks={totalTasks}
-              doneTasks={doneTasks}
-            />
+            {/* Left: job details + status + workpool summary */}
+            <div
+              style={{
+                width: 280,
+                flexShrink: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: "1rem",
+              }}
+            >
+              <JobDetailsPanel
+                jobDetail={jobId ? jobCache[jobId] : undefined}
+                statusCounts={statusCounts}
+                statusOrder={statusOrder}
+                ratePerMin={ratePerMin}
+                etaDate={etaDate}
+                totalTasks={totalTasks}
+                doneTasks={doneTasks}
+              />
+              {workpoolInfo && (
+                <WorkPoolSummaryCard
+                  info={workpoolInfo}
+                  activeWorkerCount={activeWorkerCount}
+                  jobCount={workpoolJobCount}
+                />
+              )}
+            </div>
 
             {/* Right: charts */}
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -752,7 +772,7 @@ export default function JobDetail() {
                         task.events.filter(
                           (e) =>
                             e.type === "task_state_update" &&
-                            (e as TaskStateUpdateEvent).new_state === "claimed"
+                            (e as TaskStateUpdateEvent).new_state === "claimed",
                         ).length
                       }
                     </td>

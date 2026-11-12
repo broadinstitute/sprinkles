@@ -1,13 +1,11 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
-import { Link } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
 import { RefreshToggle } from "../components/RefreshControls";
-import JobsTable, {
-  labelColors,
-  workerPoolColor,
-} from "../components/JobsTable";
+import JobsTable, { labelColors } from "../components/JobsTable";
 import type { BackendJobSummary } from "../types";
 import { apiFetch } from "../api/client";
+import WorkPoolSummaryCard from "../components/WorkPoolSummaryCard";
+import type { WorkpoolInfo } from "../components/WorkPoolSummaryCard";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -26,23 +24,9 @@ const SYSTEM_LABEL_KEYS = new Set([
 
 // ── Colors ───────────────────────────────────────────────────────────────────
 
-const C_OK = "oklch(45% 0.14 145)";
-const C_BAD = "oklch(48% 0.20 25)";
-const C_BAD_SOFT = "oklch(72% 0.16 25)";
 const MONO = "'IBM Plex Mono', monospace";
 
 // ── useWorkerPools hook ───────────────────────────────────────────────────────
-
-interface WorkpoolInfo {
-  workpool_id: string;
-  machine_type: string;
-  region: string;
-  state: string;
-  state_message: string;
-  last_incident_at: string | null;
-  incident_count: number;
-  expiry: string;
-}
 
 interface WorkerPool {
   info: WorkpoolInfo;
@@ -52,7 +36,7 @@ interface WorkerPool {
 
 function useWorkerPools(
   jobs: BackendJobSummary[],
-  active: boolean
+  active: boolean,
 ): WorkerPool[] {
   const [workpools, setWorkpools] = useState<WorkpoolInfo[]>([]);
   const [workerCounts, setWorkerCounts] = useState<Record<string, number>>({});
@@ -73,7 +57,7 @@ function useWorkerPools(
               data.map(async (wp) => {
                 try {
                   const r = await apiFetch(
-                    `/api/v1/workpool/${wp.workpool_id}/workers?status=started`
+                    `/api/v1/workpool/${wp.workpool_id}/workers?status=started`,
                   );
                   if (r.ok) {
                     const workers: unknown[] = await r.json();
@@ -82,7 +66,7 @@ function useWorkerPools(
                 } catch {
                   /* ignore */
                 }
-              })
+              }),
             );
             setWorkerCounts(counts);
           }
@@ -105,169 +89,6 @@ function useWorkerPools(
       jobs: jobs.filter((j) => j.workpool_id === wp.workpool_id),
     }));
   }, [workpools, workerCounts, jobs]);
-}
-
-// ── Worker pool card ──────────────────────────────────────────────────────────
-
-function WorkerPoolCard({ pool }: { pool: WorkerPool }) {
-  const col = workerPoolColor(pool.info.workpool_id);
-  const wp = pool.info;
-  const hasIncident = wp.incident_count > 0;
-
-  return (
-    <div
-      style={{
-        background: "white",
-        border: "1.5px solid #ddd",
-        borderRadius: 4,
-        overflow: "hidden",
-      }}
-    >
-      {/* Header */}
-      <Link
-        to={`/workpools/${wp.workpool_id}`}
-        style={{ textDecoration: "none" }}
-      >
-        <div
-          style={{
-            padding: "8px 10px",
-            background: "#fafafa",
-            borderBottom: "1px solid #eee",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
-          }}
-        >
-          <span
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: 2,
-              flexShrink: 0,
-              background: col.bg,
-              border: `1.5px solid ${col.border}`,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              fontFamily: MONO,
-              color: "#222",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-            }}
-          >
-            {wp.workpool_id}
-          </span>
-          {wp.machine_type && (
-            <span
-              style={{
-                fontSize: 11,
-                fontFamily: MONO,
-                color: "#888",
-                flexShrink: 0,
-              }}
-            >
-              {wp.machine_type}
-            </span>
-          )}
-        </div>
-      </Link>
-
-      {/* Incident alert */}
-      {hasIncident && (
-        <div
-          style={{
-            padding: "7px 10px",
-            background: "oklch(97% 0.04 25)",
-            borderBottom: `1px solid ${C_BAD_SOFT}`,
-            fontSize: 12,
-            fontFamily: MONO,
-            color: C_BAD,
-            lineHeight: 1.45,
-          }}
-        >
-          ⚠ {wp.incident_count} incident{wp.incident_count !== 1 ? "s" : ""}
-          {wp.state_message && (
-            <span style={{ color: "#555", fontWeight: 400 }}>
-              {" — "}
-              {wp.state_message}
-            </span>
-          )}
-        </div>
-      )}
-
-      <div style={{ padding: "10px 12px 12px" }}>
-        {/* Stats */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 8,
-            marginBottom: 8,
-          }}
-        >
-          {[
-            {
-              value: pool.activeWorkerCount,
-              label: "ACTIVE WORKERS",
-              color: pool.activeWorkerCount > 0 ? C_OK : "#bbb",
-            },
-            {
-              value: pool.jobs.length,
-              label: "JOBS",
-              color: pool.jobs.length > 0 ? "#222" : "#bbb",
-            },
-          ].map(({ value, label, color }) => (
-            <div
-              key={label}
-              style={{ display: "flex", flexDirection: "column" }}
-            >
-              <span
-                style={{
-                  fontSize: 18,
-                  lineHeight: 1,
-                  fontFamily: MONO,
-                  fontWeight: 700,
-                  color,
-                }}
-              >
-                {value}
-              </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  letterSpacing: 1.2,
-                  color: "#999",
-                  fontFamily: MONO,
-                  marginTop: 3,
-                }}
-              >
-                {label}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {wp.region && (
-          <div
-            style={{
-              fontSize: 11,
-              fontFamily: MONO,
-              color: "#aaa",
-              marginTop: 4,
-            }}
-          >
-            {wp.region}
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 function ColorSwatch({ color }: { color: string }) {
@@ -311,7 +132,12 @@ function WorkerPoolSection({
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {pools.map((p) => (
-          <WorkerPoolCard key={p.info.workpool_id} pool={p} />
+          <WorkPoolSummaryCard
+            key={p.info.workpool_id}
+            info={p.info}
+            activeWorkerCount={p.activeWorkerCount}
+            jobCount={p.jobs.length}
+          />
         ))}
       </div>
     </div>
@@ -663,7 +489,7 @@ type JobLabel = { name: string; value: string };
 // Returns the job's resulting label list, as persisted server-side.
 async function setJobHidden(
   jobId: string,
-  hidden: boolean
+  hidden: boolean,
 ): Promise<JobLabel[]> {
   const res = await apiFetch(`/api/v1/job/${jobId}/labels`, {
     method: "POST",
@@ -671,7 +497,7 @@ async function setJobHidden(
     body: JSON.stringify(
       hidden
         ? { set: [{ name: "hidden", value: "true" }] }
-        : { remove: ["hidden"] }
+        : { remove: ["hidden"] },
     ),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -700,14 +526,8 @@ async function cancelJobRequest(jobId: string): Promise<void> {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function JobList() {
-  const {
-    jobs,
-    jobCache,
-    paused,
-    setPaused,
-    lastUpdatedAt,
-    updateJobLabels,
-  } = useEvents();
+  const { jobs, jobCache, paused, setPaused, lastUpdatedAt, updateJobLabels } =
+    useEvents();
   const [search, setSearch] = useState("");
   const [timePreset, setTimePreset] = useState(0);
   const [facets, setFacets] = useState<Record<string, Set<string>>>({});
@@ -728,7 +548,7 @@ export default function JobList() {
           updateJobLabels(jobId, priorLabels);
         });
     },
-    [jobCache, updateJobLabels]
+    [jobCache, updateJobLabels],
   );
 
   // Cancellation is best-effort/asynchronous server-side (see
@@ -772,7 +592,7 @@ export default function JobList() {
 
   const activeFacetCount = useMemo(
     () => Object.values(facets).reduce((n, s) => n + s.size, 0),
-    [facets]
+    [facets],
   );
 
   // ── Filtering ──────────────────────────────────────────────────────────────
@@ -785,7 +605,7 @@ export default function JobList() {
         metadata: jobCache[j.job_id]?.metadata,
         name: jobCache[j.job_id]?.name,
       })),
-    [jobs, jobCache]
+    [jobs, jobCache],
   );
 
   // Stage 1: time filter
@@ -812,7 +632,7 @@ export default function JobList() {
         ([k, v]) =>
           k.toLowerCase().includes(q) ||
           v.toLowerCase().includes(q) ||
-          `${k}=${v}`.toLowerCase().includes(q)
+          `${k}=${v}`.toLowerCase().includes(q),
       );
     });
   }, [visibilityFiltered, search]);
@@ -820,7 +640,7 @@ export default function JobList() {
   // Helper: does a job match all facets except one key?
   function matchesFacetsExcept(
     meta: Record<string, string> | undefined,
-    exceptKey: string | null
+    exceptKey: string | null,
   ) {
     return Object.entries(facets).every(([k, vs]) => {
       if (k === exceptKey) return true;
@@ -835,7 +655,7 @@ export default function JobList() {
         .filter((j) => matchesFacetsExcept(j.metadata, null))
         .sort((a, b) => b.submitDate.getTime() - a.submitDate.getTime()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [searchFiltered, facets]
+    [searchFiltered, facets],
   );
 
   // Build facet index: for each (key, value) compute how many jobs would remain
@@ -853,7 +673,7 @@ export default function JobList() {
     }
     for (const k of Object.keys(index)) {
       const peers = searchFiltered.filter((j) =>
-        matchesFacetsExcept(j.metadata, k)
+        matchesFacetsExcept(j.metadata, k),
       );
       for (const v of Object.keys(index[k])) {
         index[k][v] = peers.filter((j) => j.metadata?.[k] === v).length;
@@ -930,9 +750,9 @@ export default function JobList() {
                 <FacetKeyButton
                   key={k}
                   k={k}
-                  values={Object.entries(
-                    facetIndex[k]
-                  ).map(([value, count]) => ({ value, count }))}
+                  values={Object.entries(facetIndex[k]).map(
+                    ([value, count]) => ({ value, count }),
+                  )}
                   selected={facets[k] ?? new Set()}
                   onToggle={(v) => toggleFacet(k, v)}
                   onClear={() => clearFacet(k)}
