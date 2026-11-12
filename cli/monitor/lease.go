@@ -213,6 +213,13 @@ func (a *Monitor) SetLease(store LeaseStore, ttl time.Duration) {
 // full ttl plus a renewal interval; a holder that is alive keeps renewing, so
 // after that we give up with an error naming it. It does nothing if no lease
 // is configured.
+//
+// When the lease is held by someone else, the first thing it does is record
+// in the monitor's error log (so it shows on the dashboard, and the console)
+// that this monitor is not running and why. Once it does acquire a lease it
+// had to wait for, it records that the monitor is now running. A caller that
+// gets an error back decides what to do about it; the error is not logged
+// here.
 func (a *Monitor) AcquireLease(ctx context.Context) error {
 	l := a.lease
 	if l == nil {
@@ -220,11 +227,15 @@ func (a *Monitor) AcquireLease(ctx context.Context) error {
 	}
 	ctx = WithFirestoreLabel(ctx, "monitor lease")
 	deadline := a.clock.Now().Add(l.ttl + l.ttl/3)
+	reported := false
 	for {
 		now := a.clock.Now()
 		err := l.store.TryAcquire(ctx, l.claim, now, l.ttl)
 		if err == nil {
 			log.Printf("monitor lease acquired (id %s, ttl %s)", l.claim.HolderID, l.ttl)
+			if reported {
+				a.errorLog.Add("monitor lease acquired; the monitor is now running")
+			}
 			return nil
 		}
 		var held *LeaseHeldError
@@ -234,7 +245,12 @@ func (a *Monitor) AcquireLease(ctx context.Context) error {
 		if !now.Before(deadline) {
 			return fmt.Errorf("%w; refusing to run a second monitor against the same database", err)
 		}
-		log.Printf("monitor lease is held (%v); waiting for it to expire", err)
+		if !reported {
+			a.errorLog.Add("monitor is not running: %v. Waiting for that lease to expire or be released; only one monitor can run per database.", err)
+			reported = true
+		} else {
+			log.Printf("monitor lease is held (%v); waiting for it to expire", err)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

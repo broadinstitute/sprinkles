@@ -101,6 +101,7 @@ func TestAcquireLease_FreeLease(t *testing.T) {
 	store := newFakeLeaseStore()
 	w, _ := leaseWorld(store)
 	require.NoError(t, w.A.AcquireLease(context.Background()))
+	assert.Empty(t, w.A.ErrorLog().Entries(), "nothing to report when the lease is simply free")
 	id, held := store.holderID()
 	assert.True(t, held)
 	assert.Equal(t, w.A.lease.claim.HolderID, id)
@@ -142,6 +143,14 @@ func TestAcquireLease_WaitsOutAnExpiredHolder(t *testing.T) {
 	require.NoError(t, err)
 	id, _ := store.holderID()
 	assert.Equal(t, w.A.lease.claim.HolderID, id)
+
+	// The wait was reported where the dashboard shows it, and so was the
+	// recovery.
+	entries := w.A.ErrorLog().Entries()
+	require.Len(t, entries, 2)
+	assert.Contains(t, entries[0].Message, "monitor is not running")
+	assert.Contains(t, entries[0].Message, "other host")
+	assert.Contains(t, entries[1].Message, "now running")
 }
 
 // A live holder keeps renewing, so we give up rather than run a second monitor.
@@ -157,6 +166,13 @@ func TestAcquireLease_RefusesWhileAnotherHolderIsAlive(t *testing.T) {
 	require.ErrorAs(t, err, &held)
 	assert.Equal(t, "alive", held.HolderID)
 	assert.Contains(t, err.Error(), "second monitor")
+
+	// Reported once, up front (not on every retry), naming the holder.
+	entries := w.A.ErrorLog().Entries()
+	require.Len(t, entries, 1)
+	assert.Contains(t, entries[0].Message, "monitor is not running")
+	assert.Contains(t, entries[0].Message, "other host")
+	assert.Contains(t, entries[0].Message, "alive")
 }
 
 func TestReleaseLease_FreesItForAReplacement(t *testing.T) {

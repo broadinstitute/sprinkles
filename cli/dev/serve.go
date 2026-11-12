@@ -42,6 +42,39 @@ func ServeCommand() cli.Command {
 	}
 }
 
+// leaseRetryDelay is how long runMonitorWhenLeased waits after an unexpected
+// error acquiring the lease before trying again.
+const leaseRetryDelay = 30 * time.Second
+
+// runMonitorWhenLeased runs the monitor, but only once it holds the monitor
+// lease. If another monitor holds it, this waits (the dashboard keeps
+// serving, and the monitor's error log says the monitor isn't running and
+// why), and takes over if that monitor goes away. It returns when ctx ends or
+// the monitor loop exits.
+func runMonitorWhenLeased(ctx context.Context, m *monitor.Monitor) {
+	for {
+		err := m.AcquireLease(ctx)
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		var held *monitor.LeaseHeldError
+		if errors.As(err, &held) {
+			// AcquireLease already reported who holds it; wait again.
+			continue
+		}
+		m.ErrorLog().Add("monitor is not running: %v; retrying in %s", err, leaseRetryDelay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(leaseRetryDelay):
+		}
+	}
+	m.RunMonitorLoop(ctx)
+}
+
 func runServe(c *cli.Context) error {
 	project := c.String("project")
 	if project == "" {
@@ -81,7 +114,7 @@ func runServe(c *cli.Context) error {
 		var stopMonitor func()
 		m, stopMonitor, err = newMonitor(ctx, project, db, psClient, c.Bool("verbose"), 0)
 		if err != nil {
-			return fmt.Errorf("starting monitor (use --no-monitor to run only the dashboard against a database whose monitor runs elsewhere): %w", err)
+			return fmt.Errorf("starting monitor: %w", err)
 		}
 		defer stopMonitor()
 		errorLog, pollerStats = m.ErrorLog(), m.PollerStats()
@@ -100,7 +133,7 @@ func runServe(c *cli.Context) error {
 		monitorDone = make(chan struct{})
 		go func() {
 			defer close(monitorDone)
-			m.RunMonitorLoop(ctx)
+			runMonitorWhenLeased(ctx, m)
 		}()
 	}
 
@@ -116,7 +149,9 @@ func runServe(c *cli.Context) error {
 
 	// Any one of these ending takes the whole process down: a signal, the
 	// listener failing, or the monitor loop exiting (which it only does on a
-	// fatal Pub/Sub error, since linger is off).
+	// fatal Pub/Sub error or a lost lease, since linger is off). Not getting
+	// the monitor lease at startup does not: the dashboard stays up and the
+	// monitor waits for the lease (see runMonitorWhenLeased).
 	var runErr error
 	select {
 	case <-ctx.Done():

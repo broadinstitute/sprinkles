@@ -100,17 +100,21 @@ that a worker VM downloading the extra bytes at boot costs nothing material.
   (`MonitorLease/monitor`: holder id, host and pid, expiry) to run. It takes
   it at startup, renews it every 5 minutes (the lease lasts 15), and releases
   it on a clean shutdown so a replacement starts at once. A failed renewal is
-  retried every 30s. A second monitor waits up to about 20 minutes for a
-  crashed holder's lease to expire (retrying every 30s), then refuses to
-  start, naming the current holder. A running monitor that finds the lease
-  taken, or hasn't managed to renew it for 10 minutes, stops itself (so under
-  `serve` the whole process exits and the service manager restarts it).
-  Holders compare expiry against their own clocks, so the hosts need
-  reasonably synchronized time (NTP); the 5 minute margin tolerates
-  generous skew. A crash therefore blocks a replacement for up to 15
-  minutes; stopping the process cleanly (SIGINT/SIGTERM) releases the lease
-  immediately. To run only the dashboard alongside a monitor that is running
-  elsewhere, use `sprinkles serve --no-monitor`.
+  retried every 30s. A monitor that finds the lease held waits for it
+  (retrying every 30s). Under `serve` that never stops the dashboard from
+  coming up: the monitor records in its error log, so on the Monitor dashboard
+  and on the console, that it is not running, naming the holder's host, pid
+  and the lease expiry; it keeps waiting and takes over automatically if the
+  holder goes away, noting in the log that it is now running. (`sprinkles dev
+  monitor`, which is only a monitor, gives up after about 20 minutes with an
+  error instead.) A running monitor that finds the lease taken, or hasn't
+  managed to renew it for 10 minutes, stops itself (so under `serve` the whole
+  process exits and the service manager restarts it). Holders compare expiry
+  against their own clocks, so the hosts need reasonably synchronized time
+  (NTP); the 5 minute margin tolerates generous skew. A crash therefore blocks
+  a replacement for up to 15 minutes; stopping the process cleanly
+  (SIGINT/SIGTERM) releases the lease immediately. To run only the dashboard,
+  without even waiting for the lease, use `sprinkles serve --no-monitor`.
 
 ## 7.5 GCP resources used
 

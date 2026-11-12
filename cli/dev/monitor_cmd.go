@@ -122,13 +122,6 @@ func newMonitor(
 		fsClient.Close()
 		closeFSConn()
 	}
-
-	// Last, so that failing to construct anything above never leaves a lease
-	// held. Only one monitor may run against a database.
-	if err := m.AcquireLease(ctx); err != nil {
-		stop()
-		return nil, nil, err
-	}
 	return m, stop, nil
 }
 
@@ -156,6 +149,11 @@ func runDevMonitor(c *cli.Context) error {
 	}
 	defer stopMonitor()
 
+	// Only one monitor may run against a database. This command is just the
+	// monitor, so there's nothing else to keep up: fail if it can't run.
+	if err := m.AcquireLease(ctx); err != nil {
+		return err
+	}
 	m.RunMonitorLoop(ctx)
 	return nil
 }
