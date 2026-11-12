@@ -28,6 +28,19 @@ import (
 // The returned stop function must be called when the monitor is done; it
 // flushes the event publisher. The caller owns fsClient/psClient and must not
 // close them until after the monitor loop has returned.
+// newBatchAPIClient returns the Batch API client for project: the emulator
+// at SPARKLES_BATCH_API_EMULATOR if that is set, GCP's Batch API otherwise.
+func newBatchAPIClient(ctx context.Context, project string) (monitor.BatchAPIClient, error) {
+	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
+		return monitor.NewRemoteBatchAPIClient(emulatorURL), nil
+	}
+	c, err := monitor.NewGCPBatchAPIClient(ctx, project)
+	if err != nil {
+		return nil, fmt.Errorf("creating batch API client: %w", err)
+	}
+	return c, nil
+}
+
 func newMonitor(
 	ctx context.Context,
 	project, db string,
@@ -48,15 +61,9 @@ func newMonitor(
 	workers := monitor.NewFirestoreWorkerStore(fsClient)
 	tasks := monitor.NewFirestoreTaskStore(fsClient, nil)
 
-	var batchAPI monitor.BatchAPIClient
-	if emulatorURL := os.Getenv("SPARKLES_BATCH_API_EMULATOR"); emulatorURL != "" {
-		batchAPI = monitor.NewRemoteBatchAPIClient(emulatorURL)
-	} else {
-		var err error
-		batchAPI, err = monitor.NewGCPBatchAPIClient(ctx, project)
-		if err != nil {
-			return nil, nil, fmt.Errorf("creating batch API client: %w", err)
-		}
+	batchAPI, err := newBatchAPIClient(ctx, project)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	pubsubReceiver, err := monitor.NewGCPPubSubReceiver(ctx, project, batches)

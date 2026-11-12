@@ -709,6 +709,101 @@ function ResetHaltedButton({
   );
 }
 
+// Shuts a workpool down: halts it, kills every job with live tasks in it and
+// terminates its Batch jobs (POST /api/v1/workpool/{id}/terminate).
+function TerminateWorkpoolButton({
+  workpoolId,
+  onWorkpoolUpdated,
+}: {
+  workpoolId: string;
+  onWorkpoolUpdated: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ text: string; bad: boolean } | null>(
+    null,
+  );
+
+  const terminate = async () => {
+    if (
+      !window.confirm(
+        `Terminate workpool "${workpoolId}"?\n\n` +
+          "This will:\n" +
+          "  • halt the workpool so no new workers are provisioned\n" +
+          "  • kill every running or pending job in this workpool\n" +
+          "  • terminate all of its batch jobs (stopping its worker VMs)\n\n" +
+          "This cannot be undone.",
+      )
+    )
+      return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const r = await apiFetch(`/api/v1/workpool/${workpoolId}/terminate`, {
+        method: "POST",
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        setMessage({
+          text: body?.error || `Terminate failed (status ${r.status})`,
+          bad: true,
+        });
+        return;
+      }
+      const errors: string[] = body?.errors ?? [];
+      setMessage({
+        text:
+          `Killed ${body?.killed_jobs ?? 0} job(s), terminated ` +
+          `${body?.terminated_batches ?? 0} batch(es).` +
+          (errors.length ? `\nErrors:\n${errors.join("\n")}` : ""),
+        bad: errors.length > 0,
+      });
+      onWorkpoolUpdated();
+    } catch (_) {
+      setMessage({
+        text: "Terminate failed: could not reach the server",
+        bad: true,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 4, marginBottom: 8 }}>
+      <button
+        onClick={terminate}
+        disabled={busy}
+        title="Halt this workpool, kill all of its running jobs and terminate all of its batch jobs"
+        style={{
+          padding: "4px 10px",
+          fontFamily: MONO,
+          fontSize: "0.75rem",
+          color: "#fff",
+          background: busy ? "#ef9a9a" : "#b71c1c",
+          border: "none",
+          borderRadius: 4,
+          cursor: busy ? "default" : "pointer",
+        }}
+      >
+        {busy ? "terminating…" : "terminate"}
+      </button>
+      {message && (
+        <div
+          style={{
+            color: message.bad ? "#b71c1c" : "#2e7d32",
+            fontSize: "0.75rem",
+            fontFamily: MONO,
+            marginTop: 4,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {message.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function WorkPoolPropertiesPanel({
   workpoolId,
   detail,
@@ -765,6 +860,12 @@ function WorkPoolPropertiesPanel({
       />
       {detail.state === "halted" && (
         <ResetHaltedButton
+          workpoolId={workpoolId}
+          onWorkpoolUpdated={onWorkpoolUpdated}
+        />
+      )}
+      {detail.state !== "idle" && (
+        <TerminateWorkpoolButton
           workpoolId={workpoolId}
           onWorkpoolUpdated={onWorkpoolUpdated}
         />

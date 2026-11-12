@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"regexp"
@@ -43,11 +44,16 @@ type dashboardServer struct {
 	// gcs is created on first use (see gcsClient) to delete job_summary.json
 	// when a job is retried; its credentials need delete access on
 	// config.GCSPrefix.
-	gcsOnce  sync.Once
-	gcs      *storage.Client
-	gcsErr   error
-	config   *SprinklesConfig
-	errorLog *monitor.ErrorLog
+	gcsOnce sync.Once
+	gcs     *storage.Client
+	gcsErr  error
+	// batchAPI is created on first use (see batchAPIClient) to terminate a
+	// workpool's Batch jobs; tests may set it directly.
+	batchOnce sync.Once
+	batchAPI  monitor.BatchAPIClient
+	batchErr  error
+	config    *SprinklesConfig
+	errorLog  *monitor.ErrorLog
 	// pollerStats is nil when no monitor runs in this process.
 	pollerStats *monitor.PollerStats
 }
@@ -464,6 +470,124 @@ func (s *dashboardServer) handleResetWorkpool(w http.ResponseWriter, r *http.Req
 		"previous_state": previous,
 		"new_state":      newState,
 	})
+}
+
+// ----- POST /api/v1/workpool/{workpool_id}/terminate -----
+
+type terminateWorkpoolResponse struct {
+	WorkpoolID        string   `json:"workpool_id"`
+	KilledJobs        int      `json:"killed_jobs"`
+	TerminatedBatches int      `json:"terminated_batches"`
+	Errors            []string `json:"errors,omitempty"`
+}
+
+// handleTerminateWorkpool shuts a workpool down completely:
+//
+//  1. halts it, so the monitor stops provisioning replacement batches while
+//     the rest of this runs (the pool returns to idle once everything has
+//     drained; a manual reset also clears it);
+//  2. kills every job that still has a pending or in-flight task in the pool
+//     (the same mechanism as cancelling a job);
+//  3. terminates every pending/started Batch job in the pool and marks its
+//     batch terminated.
+//
+// Failures on individual jobs or batches don't stop the rest; they are
+// returned in "errors" and the response is 200 so the caller can show them.
+func (s *dashboardServer) handleTerminateWorkpool(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	workpoolID := r.PathValue("workpool_id")
+	resp := terminateWorkpoolResponse{WorkpoolID: workpoolID}
+
+	pools := monitor.NewFirestoreWorkPoolStore(s.fs)
+	ws, err := pools.Get(ctx, workpoolID)
+	if err != nil {
+		if grpcstatus.Code(err) == codes.NotFound {
+			writeError(w, http.StatusNotFound, "NOT_FOUND", "workpool not found")
+			return
+		}
+		log.Printf("dashboard: TerminateWorkpool get %s: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to get workpool")
+		return
+	}
+	batchAPI, err := s.batchAPIClient(ctx)
+	if err != nil {
+		log.Printf("dashboard: TerminateWorkpool %s: batch API client: %v", workpoolID, err)
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to create Batch API client")
+		return
+	}
+
+	addErr := func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		log.Printf("dashboard: TerminateWorkpool %s: %s", workpoolID, msg)
+		resp.Errors = append(resp.Errors, msg)
+	}
+
+	// 1. Stop provisioning. Without this the monitor could create new batches
+	// for tasks that are still pending between the steps below.
+	if ws.State.State != monitor.WorkPoolStatusHalted {
+		ws.State.State = monitor.WorkPoolStatusHalted
+		if err := pools.SaveState(ctx, ws.State); err != nil {
+			// Carrying on would leave the pool free to re-provision.
+			log.Printf("dashboard: TerminateWorkpool %s: halting: %v", workpoolID, err)
+			writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to halt workpool")
+			return
+		}
+	}
+
+	// 2. Kill every job with live tasks in this pool.
+	jobIDs := map[string]bool{}
+	iter := s.fs.Collection(sprinkles.TaskCollection).
+		Where("workpool_id", "==", workpoolID).
+		Where("status", "in", []any{sprinkles.StatusPending, sprinkles.StatusClaimed, sprinkles.StatusRunning, sprinkles.StatusWriting}).
+		Select("job_id").
+		Documents(ctx)
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			addErr("listing live tasks: %v", err)
+			break
+		}
+		if id, err := doc.DataAt("job_id"); err == nil {
+			if jobID, ok := id.(string); ok {
+				jobIDs[jobID] = true
+			}
+		}
+	}
+	iter.Stop()
+	for _, jobID := range slices.Sorted(maps.Keys(jobIDs)) {
+		if _, err := sprinkles.KillJobWithClients(ctx, s.fs, s.ps, jobID); err != nil {
+			addErr("killing job %s: %v", jobID, err)
+			continue
+		}
+		resp.KilledJobs++
+	}
+
+	// 3. Terminate the pool's live Batch jobs.
+	batchStore := monitor.NewFirestoreBatchRequestStore(s.fs)
+	batches, err := batchStore.ListByWorkpool(ctx, workpoolID, []monitor.BatchStatus{monitor.BatchStatusPending, monitor.BatchStatusStarted})
+	if err != nil {
+		addErr("listing batches: %v", err)
+	}
+	for _, b := range batches {
+		if b.JobID != "" {
+			if err := batchAPI.TerminateJob(ctx, b.JobID); err != nil {
+				addErr("terminating batch job %s: %v", b.JobID, err)
+				continue
+			}
+		}
+		b.Status = monitor.BatchStatusTerminated
+		b.TerminationReason = "Workpool terminated by operator"
+		if err := batchStore.Save(ctx, b); err != nil {
+			addErr("saving batch %s: %v", b.BatchID, err)
+			continue
+		}
+		resp.TerminatedBatches++
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ----- GET /api/v1/workpool/{workpool_id}/summary -----
@@ -1144,6 +1268,17 @@ func (s *dashboardServer) gcsClient() (*storage.Client, error) {
 		s.gcs, s.gcsErr = storage.NewClient(context.Background(), opts...)
 	})
 	return s.gcs, s.gcsErr
+}
+
+// batchAPIClient returns the server's Batch API client, creating it on first
+// use so the handler can be built without Batch API credentials.
+func (s *dashboardServer) batchAPIClient(ctx context.Context) (monitor.BatchAPIClient, error) {
+	s.batchOnce.Do(func() {
+		if s.batchAPI == nil {
+			s.batchAPI, s.batchErr = newBatchAPIClient(context.Background(), s.project)
+		}
+	})
+	return s.batchAPI, s.batchErr
 }
 
 // jobIsDeleted reports whether the job's summary is in the (final) deleted
@@ -2648,6 +2783,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/workpool/{workpool_id}", srv.handleGetWorkpool)
 	handle("PATCH /api/v1/workpool/{workpool_id}", srv.handleUpdateWorkpool)
 	handle("POST /api/v1/workpool/{workpool_id}/reset", srv.handleResetWorkpool)
+	handle("POST /api/v1/workpool/{workpool_id}/terminate", srv.handleTerminateWorkpool)
 	handle("GET /api/v1/workpool/{workpool_id}/batches", srv.handleListBatches)
 	handle("GET /api/v1/workpool/{workpool_id}/workers", srv.handleListWorkers)
 	handle("GET /api/v1/worker/{worker_id}", srv.handleGetWorker)
