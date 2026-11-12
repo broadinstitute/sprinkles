@@ -13,6 +13,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"cloud.google.com/go/pubsub/v2"
 	"github.com/urfave/cli"
+
+	"github.com/broadinstitute/sprinkles/monitor"
 )
 
 // serveShutdownGrace is how long in-flight HTTP requests get to finish once
@@ -33,6 +35,7 @@ func ServeCommand() cli.Command {
 			cli.StringFlag{Name: "db", Value: defaultDB, Usage: "Firestore database"},
 			cli.StringFlag{Name: "addr", Value: ":8080", Usage: "address for the dashboard-backend to listen on"},
 			cli.StringFlag{Name: "prefix", Usage: "URL path prefix under which all routes are served, e.g. \"sprinkles\" serves everything under /sprinkles/... (default: none, serve at the root)"},
+			cli.BoolFlag{Name: "no-monitor", Usage: "run only the dashboard-backend (REST API + UI), without the monitor"},
 			cli.BoolFlag{Name: "verbose, v", Usage: "log a message at the start of every monitor poll"},
 		},
 		Action: runServe,
@@ -47,6 +50,7 @@ func runServe(c *cli.Context) error {
 	db := c.String("db")
 	addr := c.String("addr")
 	prefix := normalizePrefix(c.String("prefix"))
+	noMonitor := c.Bool("no-monitor")
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -64,25 +68,41 @@ func runServe(c *cli.Context) error {
 	}
 	defer psClient.Close()
 
-	// No --linger here: unlike "dev monitor", a server shouldn't shut itself
-	// down when the queue goes quiet.
-	m, stopMonitor, err := newMonitor(ctx, project, db, fsClient, psClient, c.Bool("verbose"), 0)
-	if err != nil {
-		return err
+	// With --no-monitor there's no monitor in this process: its error log and
+	// poller stats stay nil, which NewDashboardHandler handles.
+	var (
+		m           *monitor.Monitor
+		errorLog    *monitor.ErrorLog
+		pollerStats *monitor.PollerStats
+	)
+	if !noMonitor {
+		// No --linger here: unlike "dev monitor", a server shouldn't shut itself
+		// down when the queue goes quiet.
+		var stopMonitor func()
+		m, stopMonitor, err = newMonitor(ctx, project, db, fsClient, psClient, c.Bool("verbose"), 0)
+		if err != nil {
+			return err
+		}
+		defer stopMonitor()
+		errorLog, pollerStats = m.ErrorLog(), m.PollerStats()
 	}
-	defer stopMonitor()
 
-	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, m.ErrorLog(), m.PollerStats())
+	handler, err := NewDashboardHandler(ctx, project, fsClient, psClient, prefix, errorLog, pollerStats)
 	if err != nil {
 		return err
 	}
 	httpSrv := &http.Server{Addr: addr, Handler: handler}
 
-	monitorDone := make(chan struct{})
-	go func() {
-		defer close(monitorDone)
-		m.RunMonitorLoop(ctx)
-	}()
+	// monitorDone stays nil with --no-monitor; a nil channel never becomes
+	// ready, so the select below simply ignores it.
+	var monitorDone chan struct{}
+	if m != nil {
+		monitorDone = make(chan struct{})
+		go func() {
+			defer close(monitorDone)
+			m.RunMonitorLoop(ctx)
+		}()
+	}
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -118,7 +138,9 @@ func runServe(c *cli.Context) error {
 	// Cancel ctx (if a signal didn't already) so the monitor loop returns, and
 	// wait for it before the deferred client Close calls run.
 	stop()
-	<-monitorDone
+	if monitorDone != nil {
+		<-monitorDone
+	}
 
 	return runErr
 }
