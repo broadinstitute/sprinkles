@@ -81,7 +81,7 @@ func runServe(c *cli.Context) error {
 		var stopMonitor func()
 		m, stopMonitor, err = newMonitor(ctx, project, db, psClient, c.Bool("verbose"), 0)
 		if err != nil {
-			return err
+			return fmt.Errorf("starting monitor (use --no-monitor to run only the dashboard against a database whose monitor runs elsewhere): %w", err)
 		}
 		defer stopMonitor()
 		errorLog, pollerStats = m.ErrorLog(), m.PollerStats()

@@ -94,6 +94,21 @@ that a worker VM downloading the extra bytes at boot costs nothing material.
   hot-reload on frontend edits, which the production binary can't (its UI is
   baked in at `build.sh` time).
 
+- **One monitor per database, enforced by a lease.** The monitor keeps
+  in-memory state, so two would provision duplicate VMs and overwrite each
+  other's summaries. A monitor therefore has to hold the lease document
+  (`MonitorLease/monitor`: holder id, host and pid, expiry) to run. It takes
+  it at startup, renews every 20s (the lease lasts 60s), and releases it on a
+  clean shutdown so a replacement starts at once. A second monitor waits up
+  to about a minute for a crashed holder's lease to expire, then refuses to
+  start, naming the current holder. A running monitor that finds the lease
+  taken, or can't renew it for 40s, stops itself (so under `serve` the whole
+  process exits and the service manager restarts it). Holders compare expiry
+  against their own clocks, so the hosts need reasonably synchronized time
+  (NTP); the 20s margin tolerates skew of that order. To run only the
+  dashboard alongside a monitor that is running elsewhere, use
+  `sprinkles serve --no-monitor`.
+
 ## 7.5 GCP resources used
 
 | Service                 | Used for                                                                            |

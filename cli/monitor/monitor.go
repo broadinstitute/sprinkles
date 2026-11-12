@@ -129,6 +129,9 @@ type Monitor struct {
 	idleMu          sync.Mutex
 	wakePending     map[string]bool      // poller -> an event asked for it to run
 	lastRun         map[string]time.Time // poller -> when it last actually ran
+
+	// lease, if set, is the lease this monitor must hold to run (see lease.go).
+	lease *monitorLease
 }
 
 // ErrorLog returns the monitor's in-memory log of recent background-poller
@@ -306,6 +309,11 @@ func New(
 // RunMonitorLoop runs the monitor until ctx is cancelled.
 // Blocks; run in a dedicated goroutine.
 func (a *Monitor) RunMonitorLoop(ctx context.Context) {
+	// Stop everything started below (notably lease renewal) however the loop
+	// ends.
+	ctx, stopLoop := context.WithCancel(ctx)
+	defer stopLoop()
+
 	var lastActivityPrinted time.Time
 
 	sched := scheduler.New(a.clock)
@@ -407,6 +415,17 @@ func (a *Monitor) RunMonitorLoop(ctx context.Context) {
 	// Route PubSub notifications to the appropriate pollers in a background goroutine.
 	// A notification with Err set means the receive loop failed fatally; propagate it.
 	fatalErrCh := make(chan error, 1)
+
+	// Keep the monitor lease alive; losing it (another monitor took over) or
+	// being unable to renew it stops the loop.
+	if a.lease != nil {
+		go a.runLeaseRenewal(ctx, func(err error) {
+			select {
+			case fatalErrCh <- err:
+			default: // a fatal error is already pending
+			}
+		})
+	}
 
 	if a.jobEvents != nil {
 		go func() {

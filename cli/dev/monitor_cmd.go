@@ -95,6 +95,7 @@ func newMonitor(
 
 	m := monitor.New(scheduler.RealClock, batchAPI, pools, batches, workers, tasks, pubsubReceiver, db)
 	m.SetFirestoreCallStats(callStats)
+	m.SetLease(monitor.NewFirestoreLeaseStore(fsClient), 0)
 	m.SetVerbose(verbose)
 	m.SetJobEventReceiver(jobEventReceiver)
 	m.SetJobSummaryStore(jobSummaries)
@@ -112,9 +113,21 @@ func newMonitor(
 
 	stop := func() {
 		ep.Stop()
+		// Give the lease up so a replacement doesn't wait for it to expire.
+		// A fresh context: ours may already be cancelled by the shutdown signal.
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		m.ReleaseLease(releaseCtx)
+		cancel()
 		gcsClient.Close()
 		fsClient.Close()
 		closeFSConn()
+	}
+
+	// Last, so that failing to construct anything above never leaves a lease
+	// held. Only one monitor may run against a database.
+	if err := m.AcquireLease(ctx); err != nil {
+		stop()
+		return nil, nil, err
 	}
 	return m, stop, nil
 }
