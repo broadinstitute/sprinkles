@@ -80,7 +80,7 @@ function formatTime(ms: number): string {
 
 function useWorkPoolDetail(
   workpoolId: string | undefined,
-  active: boolean
+  active: boolean,
 ): [WorkPoolDetail | undefined, () => void] {
   const [detail, setDetail] = useState<WorkPoolDetail | undefined>();
   // refreshNonce lets callers (e.g. after a successful edit) force an
@@ -110,7 +110,7 @@ function useWorkPoolDetail(
 
 function useWorkPoolSummaryHistory(
   workpoolId: string | undefined,
-  active: boolean
+  active: boolean,
 ): { history: WorkPoolSummaryHistoryEntry[]; lastUpdatedAt: number | null } {
   const [history, setHistory] = useState<WorkPoolSummaryHistoryEntry[]>([]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -120,7 +120,7 @@ function useWorkPoolSummaryHistory(
     const poll = async () => {
       try {
         const r = await apiFetch(
-          `/api/v1/workpool/${workpoolId}/summary-history`
+          `/api/v1/workpool/${workpoolId}/summary-history`,
         );
         if (!r.ok || cancelled) return;
         const data = await r.json();
@@ -142,7 +142,7 @@ function useWorkPoolSummaryHistory(
 
 function useWorkers(
   workpoolId: string | undefined,
-  active: boolean
+  active: boolean,
 ): WorkerRecord[] {
   const [workers, setWorkers] = useState<WorkerRecord[]>([]);
   useEffect(() => {
@@ -151,7 +151,7 @@ function useWorkers(
     const poll = async () => {
       try {
         const r = await apiFetch(
-          `/api/v1/workpool/${workpoolId}/workers?status=all`
+          `/api/v1/workpool/${workpoolId}/workers?status=all`,
         );
         if (!r.ok || cancelled) return;
         const data = await r.json();
@@ -185,7 +185,7 @@ function useJobs(workpoolId: string | undefined, active: boolean): JobRecord[] {
     const poll = async () => {
       try {
         const r = await apiFetch(
-          `/api/v1/jobs?workpool_id=${encodeURIComponent(workpoolId)}`
+          `/api/v1/jobs?workpool_id=${encodeURIComponent(workpoolId)}`,
         );
         if (!r.ok || cancelled) return;
         const data = await r.json();
@@ -204,7 +204,7 @@ function useJobs(workpoolId: string | undefined, active: boolean): JobRecord[] {
 
 function useBatches(
   workpoolId: string | undefined,
-  active: boolean
+  active: boolean,
 ): BatchRecord[] {
   const [batches, setBatches] = useState<BatchRecord[]>([]);
   useEffect(() => {
@@ -236,9 +236,7 @@ interface ChartPoint {
   [key: string]: number | string;
 }
 
-function computeWorkPoolTimeSeries(
-  history: WorkPoolSummaryHistoryEntry[]
-): {
+function computeWorkPoolTimeSeries(history: WorkPoolSummaryHistoryEntry[]): {
   workerCounts: ChartPoint[];
   taskCounts: ChartPoint[];
   taskTerminalDeltas: ChartPoint[];
@@ -282,7 +280,7 @@ function computeWorkPoolTimeSeries(
     const pendingP = Math.max(0, h.expected_preemptible_workers - startedP);
     const pendingNP = Math.max(
       0,
-      h.expected_nonpreemptible_workers - startedNP
+      h.expected_nonpreemptible_workers - startedNP,
     );
     return {
       time: t,
@@ -687,11 +685,11 @@ function ResetHaltedButton({
           {resetting ? "resetting…" : "reset"}
         </button>
         <Link
-          to="/errors"
-          title="View the monitor's error log to see why this workpool halted"
+          to="/monitor"
+          title="View the monitor dashboard's error log to see why this workpool halted"
           style={{ fontSize: "0.75rem", fontFamily: MONO, color: "#1565c0" }}
         >
-          view error log
+          view monitor dashboard
         </Link>
       </div>
       {error && (
@@ -793,7 +791,10 @@ function WorkPoolPropertiesPanel({
           )
         }
       />
-      <DetailRow label="service account" value={detail.service_account || dash} />
+      <DetailRow
+        label="service account"
+        value={detail.service_account || dash}
+      />
       <DetailRow label="machine type" value={detail.machine_type || dash} />
       <DetailRow label="region" value={detail.region || dash} />
       <DetailRow
@@ -857,11 +858,11 @@ function OverviewTab({ workpoolId }: { workpoolId: string }) {
 
   const [detail, refetchDetail] = useWorkPoolDetail(
     workpoolId,
-    range?.live ?? true
+    range?.live ?? true,
   );
   const { history: fullHistory, lastUpdatedAt } = useWorkPoolSummaryHistory(
     workpoolId,
-    range?.live ?? true
+    range?.live ?? true,
   );
 
   const earliestMs = useMemo(
@@ -869,7 +870,7 @@ function OverviewTab({ workpoolId }: { workpoolId: string }) {
       fullHistory.length > 0
         ? new Date(fullHistory[0].timestamp).getTime()
         : null,
-    [fullHistory]
+    [fullHistory],
   );
 
   // The most recent history entry's timestamp mirrors WorkPoolSummary.last_updated
@@ -879,7 +880,7 @@ function OverviewTab({ workpoolId }: { workpoolId: string }) {
       fullHistory.length > 0
         ? new Date(fullHistory[fullHistory.length - 1].timestamp).getTime()
         : null,
-    [fullHistory]
+    [fullHistory],
   );
 
   const history = useMemo(() => {

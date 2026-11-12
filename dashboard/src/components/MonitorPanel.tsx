@@ -359,6 +359,13 @@ export default function MonitorPanel() {
 
 const styles = `
   .mon-panel {
+    /* Design tokens, so the panel doesn't depend on the page it's shown in. */
+    --bcl-gray: #63666A;
+    --bcl-gray-bg: #F2F4F6;
+    --bcl-ink: #1A1D1F;
+    --bcl-border: #E0E3E6;
+    --bcl-negative: #C0554A;
+
     border: 1px solid var(--bcl-border);
     border-radius: 8px;
     background: #fff;

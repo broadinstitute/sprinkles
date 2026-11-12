@@ -1,5 +1,5 @@
 import { UnseenErrorsProvider } from "./data/UnseenErrors";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import { BASE_PATH } from "./api/client";
 import { EventProvider } from "./data/EventProvider";
 import NavBar from "./components/NavBar";
@@ -15,7 +15,7 @@ import WorkerDetail from "./pages/WorkerDetail";
 import BatchDetail from "./pages/BatchDetail";
 import NotImplemented from "./pages/NotImplemented";
 import InvalidApiKey from "./pages/InvalidApiKey";
-import ErrorLog from "./pages/ErrorLog";
+import MonitorDashboard from "./pages/MonitorDashboard";
 
 function AppRoutes() {
   return (
@@ -66,7 +66,10 @@ function AppRoutes() {
           />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
           <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
-          <Route path="/errors" element={<ErrorLog />} />
+          <Route path="/monitor" element={<MonitorDashboard />} />
+          <Route path="/monitor/stats" element={<MonitorDashboard />} />
+          {/* The error log used to live at /errors. */}
+          <Route path="/errors" element={<Navigate to="/monitor" replace />} />
           <Route path="/invalid-api-key" element={<InvalidApiKey />} />
           <Route path="*" element={<NotImplemented />} />
         </Routes>

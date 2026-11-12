@@ -75,6 +75,11 @@ function parseBreadcrumbs(
     } else {
       items.push({ label: workpoolId });
     }
+  } else if (segs[0] === "monitor" && segs[1] === "stats") {
+    items.push({ label: "monitor", href: "/monitor" });
+    items.push({ label: "stats" });
+  } else if (segs[0] === "monitor") {
+    items.push({ label: "monitor" });
   } else if (segs[0] === "clusters" && segs[1]) {
     items.push({ label: segs[1] });
   }
@@ -270,9 +275,10 @@ export default function NavBar() {
   const { jobs, jobCache } = useEvents();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { hasUnseen } = useUnseenErrors();
-  // On the error log page the user is looking at the errors already.
-  const onErrorsPage = location.pathname.endsWith("/errors");
-  const showNewErrors = hasUnseen && !onErrorsPage;
+  // On the monitor dashboard's error log tab (not its stats tab) the user is
+  // looking at the errors already.
+  const onMonitorPage = location.pathname.endsWith("/monitor");
+  const showNewErrors = hasUnseen && !onMonitorPage;
 
   const entries = useMemo<PaletteEntry[]>(() => {
     // jobCache (populated lazily per job, see EventProvider) is the only
@@ -402,9 +408,9 @@ export default function NavBar() {
             flexShrink: 0,
           }}
         >
-          {/* Error log link; highlighted when there are errors not yet seen */}
+          {/* Monitor dashboard link; highlighted when there are errors not yet seen */}
           <Link
-            to="/errors"
+            to="/monitor"
             title={
               showNewErrors ? "New errors since you last looked" : undefined
             }
@@ -433,7 +439,7 @@ export default function NavBar() {
                 }}
               />
             )}
-            Error log{showNewErrors ? " (new)" : ""}
+            Monitor dashboard{showNewErrors ? " (new errors)" : ""}
           </Link>
 
           {/* ⌘K pill */}

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import MonitorPanel from "../components/MonitorPanel";
 import { useEvents } from "../data/EventProvider";
 import { useVersion } from "../data/useVersion";
 import { apiFetch } from "../api/client";
@@ -111,8 +110,6 @@ export default function Home() {
             </p>
           </div>
         </div>
-
-        <MonitorPanel />
       </div>
     </>
   );

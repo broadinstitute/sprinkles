@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { RefreshToggle } from "../components/RefreshControls";
 import type { ErrorLogEntry } from "../types";
 import { useUnseenErrors } from "../data/UnseenErrors";
 import ErrorLogList from "../components/ErrorLogList";
+import MonitorPanel from "../components/MonitorPanel";
+import TabBar from "../components/TabBar";
 
 const MONO = "'IBM Plex Mono', monospace";
 const POLL_INTERVAL_MS = 30_000;
@@ -24,7 +26,9 @@ function downloadLog(errors: ErrorLogEntry[]) {
   URL.revokeObjectURL(url);
 }
 
-export default function ErrorLog() {
+// The error log tab. It polls only while it's showing, which is also what
+// makes viewing it count as having seen the errors (see markSeen).
+function ErrorLogTab() {
   const [errors, setErrors] = useState<ErrorLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -83,33 +87,35 @@ export default function ErrorLog() {
   }, [errors]);
 
   return (
-    <div
-      style={{
-        padding: "2rem",
-        fontFamily: MONO,
-        maxWidth: 1100,
-        margin: "0 auto",
-      }}
-    >
+    <>
       <div
         style={{
           display: "flex",
-          alignItems: "baseline",
+          alignItems: "flex-start",
           justifyContent: "space-between",
-          marginBottom: "0.5rem",
+          gap: "1rem",
+          marginBottom: "1rem",
         }}
       >
-        <h1
+        <p
           style={{
-            fontSize: "1.6rem",
-            fontWeight: 700,
-            color: "#111",
+            color: "#888",
+            fontSize: "0.85rem",
             margin: 0,
           }}
         >
-          Error Log
-        </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          Recent errors from the monitor's background pollers (cluster
+          reconciler, provisioning, task recovery, batch startup monitor,
+          summary polls, etc.), polled every 30s.
+        </p>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "1rem",
+            flexShrink: 0,
+          }}
+        >
           <button
             type="button"
             onClick={() => downloadLog(errors)}
@@ -134,33 +140,50 @@ export default function ErrorLog() {
           />
         </div>
       </div>
-      <p
-        style={{
-          color: "#888",
-          fontSize: "0.85rem",
-          marginTop: 0,
-          marginBottom: "1rem",
-        }}
-      >
-        Recent errors from the monitor's background pollers (cluster reconciler,
-        provisioning, task recovery, batch startup monitor, summary polls,
-        etc.), polled every 30s.
-      </p>
 
       <ErrorLogList errors={errors} loading={loading} bottomRef={bottomRef} />
+    </>
+  );
+}
 
-      <div style={{ marginTop: "1.5rem" }}>
-        <Link
-          to="/jobs"
-          style={{
-            color: "#1565c0",
-            textDecoration: "none",
-            fontSize: "0.85rem",
-          }}
-        >
-          ← Back to dashboard
-        </Link>
-      </div>
+export default function MonitorDashboard() {
+  const location = useLocation();
+  const { hasUnseen } = useUnseenErrors();
+  const isStatsTab = location.pathname.endsWith("/monitor/stats");
+
+  const tabs = [
+    {
+      // Flag new errors from the other tab; on this tab they're being shown.
+      label: hasUnseen && isStatsTab ? "Error log (new)" : "Error log",
+      href: "/monitor",
+      matchExact: true,
+    },
+    { label: "Stats", href: "/monitor/stats", matchExact: true },
+  ];
+
+  return (
+    <div
+      style={{
+        padding: "2rem",
+        fontFamily: MONO,
+        maxWidth: 1100,
+        margin: "0 auto",
+      }}
+    >
+      <h1
+        style={{
+          fontSize: "1.6rem",
+          fontWeight: 700,
+          color: "#111",
+          margin: "0 0 1.5rem",
+        }}
+      >
+        Monitor dashboard
+      </h1>
+
+      <TabBar tabs={tabs} />
+
+      {isStatsTab ? <MonitorPanel /> : <ErrorLogTab />}
     </div>
   );
 }
