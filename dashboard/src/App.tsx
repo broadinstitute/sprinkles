@@ -15,6 +15,7 @@ import WorkerDetail from "./pages/WorkerDetail";
 import BatchDetail from "./pages/BatchDetail";
 import NotImplemented from "./pages/NotImplemented";
 import InvalidApiKey from "./pages/InvalidApiKey";
+import Settings from "./pages/Settings";
 import MonitorDashboard from "./pages/MonitorDashboard";
 
 function AppRoutes() {
@@ -66,6 +67,7 @@ function AppRoutes() {
           />
           <Route path="/clusters/:clusterId" element={<ClusterDetail />} />
           <Route path="/clusters/:clusterId/logs" element={<ClusterLogs />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="/monitor" element={<MonitorDashboard />} />
           <Route path="/monitor/stats" element={<MonitorDashboard />} />
           {/* The error log used to live at /errors. */}

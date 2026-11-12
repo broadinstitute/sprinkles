@@ -341,3 +341,13 @@ export interface ErrorLogEntry {
   timestamp: string;
   message: string;
 }
+
+// SprinklesConfig as returned by GET /api/v1/config (read-only).
+export interface SprinklesConfig {
+  gcsPrefix: string;
+  subscriberSA: string;
+  sprinklesWorkerGCSPath: string;
+  serviceAccount: string;
+  region: string;
+  zones: string[];
+}

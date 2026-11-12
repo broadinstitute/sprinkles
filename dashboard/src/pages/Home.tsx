@@ -56,6 +56,9 @@ export default function Home() {
           <img src="favicon.svg" alt="" className="home-logo" />
           <span className="home-title">Sprinkles</span>
           {version && <span className="home-version">{version}</span>}
+          <Link to="/settings" className="home-settings-btn">
+            Settings
+          </Link>
         </div>
 
         <div className="home-cards">
@@ -160,6 +163,20 @@ const styles = `
     border-radius: 3px;
     padding: 3px 7px;
   }
+
+  .home-settings-btn {
+    margin-left: auto;
+    font: 600 13px 'Open Sans', sans-serif;
+    color: var(--bcl-blue);
+    text-decoration: none;
+    border: 1px solid var(--bcl-border);
+    border-radius: 6px;
+    padding: 7px 14px;
+    background: #fff;
+    transition: border-color 0.12s;
+  }
+
+  .home-settings-btn:hover { border-color: var(--bcl-blue); }
 
   .home-cards {
     display: grid;

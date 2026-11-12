@@ -1972,6 +1972,14 @@ func (s *dashboardServer) handleGetVersion(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"version": Version})
 }
 
+// ----- GET /api/v1/config -----
+
+// handleGetConfig returns the SprinklesConfig the backend loaded at startup,
+// so the dashboard can display it (read-only).
+func (s *dashboardServer) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.config)
+}
+
 // ----- GET /api/v1/metrics -----
 
 // handleGetMetrics serves the static metric metadata table, so the dashboard
@@ -2659,6 +2667,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/task/{task_id}", srv.handleGetTask)
 	handle("GET /api/v1/task/{task_id}/log", srv.handleGetTaskLog)
 	handle("GET /api/v1/version", srv.handleGetVersion)
+	handle("GET /api/v1/config", srv.handleGetConfig)
 	handle("GET /api/v1/metrics", srv.handleGetMetrics)
 	handle("GET /api/v1/errors", srv.handleListErrors)
 	handle("GET /api/v1/errors/latest", srv.handleLatestError)
