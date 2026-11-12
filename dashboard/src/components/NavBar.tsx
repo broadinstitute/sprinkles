@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useEvents } from "../data/EventProvider";
+import { useUnseenErrors } from "../data/UnseenErrors";
 import { getJobs, getClusters } from "../data/events";
 
 interface BreadcrumbSegment {
@@ -10,7 +11,7 @@ interface BreadcrumbSegment {
 
 function parseBreadcrumbs(
   pathname: string,
-  jobNames: Record<string, string>
+  jobNames: Record<string, string>,
 ): BreadcrumbSegment[] {
   const segs = pathname.split("/").filter(Boolean);
   const items: BreadcrumbSegment[] = [{ label: "sprinkles", href: "/" }];
@@ -120,7 +121,7 @@ function CommandPalette({
     return entries.filter(
       (e) =>
         e.label.toLowerCase().includes(q) ||
-        e.subLabel?.toLowerCase().includes(q)
+        e.subLabel?.toLowerCase().includes(q),
     );
   }, [query, entries]);
 
@@ -268,6 +269,10 @@ export default function NavBar() {
   const location = useLocation();
   const { jobs, jobCache } = useEvents();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const { hasUnseen } = useUnseenErrors();
+  // On the error log page the user is looking at the errors already.
+  const onErrorsPage = location.pathname.endsWith("/errors");
+  const showNewErrors = hasUnseen && !onErrorsPage;
 
   const entries = useMemo<PaletteEntry[]>(() => {
     // jobCache (populated lazily per job, see EventProvider) is the only
@@ -306,9 +311,9 @@ export default function NavBar() {
   const jobNames = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(jobCache).map(([jobId, detail]) => [jobId, detail.name])
+        Object.entries(jobCache).map(([jobId, detail]) => [jobId, detail.name]),
       ),
-    [jobCache]
+    [jobCache],
   );
   const breadcrumbs = parseBreadcrumbs(location.pathname, jobNames);
 
@@ -389,33 +394,76 @@ export default function NavBar() {
           })}
         </div>
 
-        {/* ⌘K pill */}
-        <button
-          onClick={() => setPaletteOpen(true)}
+        <div
           style={{
-            all: "unset",
-            cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            gap: "0.4rem",
-            border: "1px solid #e0e0e0",
-            borderRadius: 6,
-            padding: "3px 10px",
-            fontSize: "0.72rem",
-            fontFamily: "inherit",
-            color: "#999",
-            background: "#fafafa",
+            gap: "0.6rem",
             flexShrink: 0,
-            whiteSpace: "nowrap",
           }}
         >
-          <span style={{ fontWeight: 600, color: "#bbb" }}>⌘K</span>
-          <span
-            style={{ borderLeft: "1px solid #e0e0e0", paddingLeft: "0.4rem" }}
+          {/* Error log link; highlighted when there are errors not yet seen */}
+          <Link
+            to="/errors"
+            title={
+              showNewErrors ? "New errors since you last looked" : undefined
+            }
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              border: `1px solid ${showNewErrors ? "#ef9a9a" : "#e0e0e0"}`,
+              borderRadius: 6,
+              padding: "3px 10px",
+              fontSize: "0.72rem",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+              color: showNewErrors ? "#c62828" : "#999",
+              background: showNewErrors ? "#ffebee" : "#fafafa",
+              fontWeight: showNewErrors ? 600 : 400,
+            }}
           >
-            jump to job / task…
-          </span>
-        </button>
+            {showNewErrors && (
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: "50%",
+                  background: "#c62828",
+                }}
+              />
+            )}
+            Error log{showNewErrors ? " (new)" : ""}
+          </Link>
+
+          {/* ⌘K pill */}
+          <button
+            onClick={() => setPaletteOpen(true)}
+            style={{
+              all: "unset",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              border: "1px solid #e0e0e0",
+              borderRadius: 6,
+              padding: "3px 10px",
+              fontSize: "0.72rem",
+              fontFamily: "inherit",
+              color: "#999",
+              background: "#fafafa",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span style={{ fontWeight: 600, color: "#bbb" }}>⌘K</span>
+            <span
+              style={{ borderLeft: "1px solid #e0e0e0", paddingLeft: "0.4rem" }}
+            >
+              jump to job / task…
+            </span>
+          </button>
+        </div>
       </div>
 
       {paletteOpen && (

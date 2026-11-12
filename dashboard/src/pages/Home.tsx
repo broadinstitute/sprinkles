@@ -80,9 +80,6 @@ export default function Home() {
               </div>
             )}
           </Link>
-          <Link to="/errors" className="home-card home-card-link">
-            Error Log →
-          </Link>
         </div>
 
         <div className="home-callouts">
@@ -208,15 +205,6 @@ const styles = `
   .home-card-caption-alert {
     color: #c62828;
     font-weight: 600;
-  }
-
-  .home-card-link {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bcl-gray-bg);
-    font: 600 14px 'Open Sans', sans-serif;
-    color: #1a1a1a;
   }
 
   .home-callouts {

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { RefreshToggle } from "../components/RefreshControls";
 import type { ErrorLogEntry } from "../types";
+import { useUnseenErrors } from "../data/UnseenErrors";
 import ErrorLogList from "../components/ErrorLogList";
 
 const MONO = "'IBM Plex Mono', monospace";
@@ -29,6 +30,8 @@ export default function ErrorLog() {
   const [paused, setPaused] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
+  const { markSeen } = useUnseenErrors();
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastKeyRef = useRef<string | null>(null);
   const hasLoadedRef = useRef(false);
@@ -46,6 +49,8 @@ export default function ErrorLog() {
           if (res.ok && !cancelled) {
             const data: { errors: ErrorLogEntry[] } = await res.json();
             setErrors(data.errors ?? []);
+            const newest = data.errors?.[data.errors.length - 1];
+            if (newest) markSeen(newest.timestamp);
             setLastUpdatedAt(Date.now());
             setLoading(false);
           }
@@ -59,7 +64,7 @@ export default function ErrorLog() {
     return () => {
       cancelled = true;
     };
-  }, [paused]);
+  }, [paused, markSeen]);
 
   // Auto-scroll to the bottom whenever a new error has arrived since the
   // last render: jump instantly into view on first load, then smooth-scroll

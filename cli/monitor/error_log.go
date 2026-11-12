@@ -55,3 +55,15 @@ func (l *ErrorLog) Entries() []ErrorLogEntry {
 	copy(out, l.entries)
 	return out
 }
+
+// LatestTimestamp returns the timestamp of the most recent entry, and false
+// if the log is empty. Cheaper than Entries() for callers that only need to
+// know whether anything new has arrived.
+func (l *ErrorLog) LatestTimestamp() (time.Time, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.entries) == 0 {
+		return time.Time{}, false
+	}
+	return l.entries[len(l.entries)-1].Timestamp, true
+}

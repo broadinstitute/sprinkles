@@ -1,3 +1,4 @@
+import { UnseenErrorsProvider } from "./data/UnseenErrors";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { BASE_PATH } from "./api/client";
 import { EventProvider } from "./data/EventProvider";
@@ -77,9 +78,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <EventProvider>
-      <BrowserRouter basename={BASE_PATH}>
-        <AppRoutes />
-      </BrowserRouter>
+      <UnseenErrorsProvider>
+        <BrowserRouter basename={BASE_PATH}>
+          <AppRoutes />
+        </BrowserRouter>
+      </UnseenErrorsProvider>
     </EventProvider>
   );
 }

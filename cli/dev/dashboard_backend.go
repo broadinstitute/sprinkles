@@ -1890,6 +1890,19 @@ func (s *dashboardServer) handleListErrors(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"errors": out})
 }
 
+// ----- GET /api/v1/errors/latest -----
+
+// handleLatestError returns just the timestamp of the newest recorded error
+// (null if there are none), so the UI can cheaply poll for "new errors since
+// you last looked" without fetching the whole log.
+func (s *dashboardServer) handleLatestError(w http.ResponseWriter, r *http.Request) {
+	var latest *time.Time
+	if ts, ok := s.errorLog.LatestTimestamp(); ok {
+		latest = &ts
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"latest_timestamp": latest})
+}
+
 // ----- GET /api/v1/monitor/status -----
 
 type monitorPollerStatus struct {
@@ -2504,6 +2517,7 @@ func NewDashboardHandler(
 	handle("GET /api/v1/version", srv.handleGetVersion)
 	handle("GET /api/v1/metrics", srv.handleGetMetrics)
 	handle("GET /api/v1/errors", srv.handleListErrors)
+	handle("GET /api/v1/errors/latest", srv.handleLatestError)
 	handle("GET /api/v1/monitor/status", srv.handleGetMonitorStatus)
 	handle("POST /api/v1/task/{task_id}/stream", srv.handleStreamTask)
 	handle("GET /api/v1/events", srv.handleListEvents)

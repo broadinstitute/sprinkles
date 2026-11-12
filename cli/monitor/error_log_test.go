@@ -39,3 +39,19 @@ func TestErrorLogEntriesIsACopy(t *testing.T) {
 		t.Errorf("Entries() returned a live reference; got %q after mutating the copy", got)
 	}
 }
+
+func TestErrorLogLatestTimestamp(t *testing.T) {
+	l := NewErrorLog(5)
+	if _, ok := l.LatestTimestamp(); ok {
+		t.Fatal("expected no latest timestamp on an empty log")
+	}
+	l.Add("first")
+	l.Add("second")
+	got, ok := l.LatestTimestamp()
+	if !ok {
+		t.Fatal("expected a latest timestamp")
+	}
+	if want := l.Entries()[1].Timestamp; !got.Equal(want) {
+		t.Errorf("LatestTimestamp() = %v, want %v", got, want)
+	}
+}
