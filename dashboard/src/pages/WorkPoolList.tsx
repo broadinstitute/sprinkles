@@ -64,8 +64,18 @@ function useWorkPools(active: boolean) {
 
 function stateChipClass(state: string): string {
   if (state === "halted" || state === "unhealthy") return "wl-chip wl-chip-red";
-  if (state === "ok" || state === "idle") return "wl-chip wl-chip-green";
+  if (state === "ok") return "wl-chip wl-chip-green";
   return "wl-chip";
+}
+
+// Sort rank by state: halted, unhealthy, ok, idle. Any other state sorts
+// between unhealthy and ok.
+const STATE_ORDER = ["halted", "unhealthy"];
+function stateRank(state: string): number {
+  if (state === "ok") return STATE_ORDER.length + 1;
+  if (state === "idle") return STATE_ORDER.length + 2;
+  const i = STATE_ORDER.indexOf(state);
+  return i >= 0 ? i : STATE_ORDER.length;
 }
 
 export default function WorkPoolList() {
@@ -85,8 +95,10 @@ export default function WorkPoolList() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const sorted = [...workpools].sort((a, b) =>
-      a.workpool_id.localeCompare(b.workpool_id),
+    const sorted = [...workpools].sort(
+      (a, b) =>
+        stateRank(a.state) - stateRank(b.state) ||
+        a.workpool_id.localeCompare(b.workpool_id),
     );
     if (!q) return sorted;
     return sorted.filter(

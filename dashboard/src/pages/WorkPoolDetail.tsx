@@ -741,7 +741,6 @@ function WorkPoolPropertiesPanel({
 
   const statusColorMap: Record<string, string> = {
     ok: "#2e7d32",
-    idle: "#2e7d32",
     halted: "#b71c1c",
     unhealthy: "#b71c1c",
   };
