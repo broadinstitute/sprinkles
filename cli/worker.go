@@ -217,6 +217,13 @@ func executeDockerCommand(ctx context.Context, imageName string, command []strin
 	// sample there will be.
 	final := tel.TriggerFinalSample()
 	ru := buildResourceUsage(containerName, final)
+	if msg := oomMessage(ru); msg != "" {
+		// Written after the container's output has drained, so it lands at the
+		// end of the task log.
+		if err := tel.WriteOutput("\n" + msg); err != nil {
+			log.Printf("writing OOM note to task log: %v", err)
+		}
+	}
 	if rmOut, rmErr := exec.Command(dockerExecutable, "rm", "-f", containerName).CombinedOutput(); rmErr != nil {
 		log.Printf("docker rm %s: %v: %s", containerName, rmErr, rmOut)
 	}

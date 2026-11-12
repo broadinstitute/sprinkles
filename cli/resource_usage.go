@@ -67,6 +67,35 @@ func buildResourceUsage(containerName string, final *MetricSample) *ResourceUsag
 	return ru
 }
 
+// oomMessage returns a human-readable line for the task log when the container
+// (or any process in its cgroup) was OOM-killed, or "" if it wasn't. Docker's
+// OOMKilled flag only reflects the main process, so the cgroup's oom_kill
+// counter is checked too to catch a killed child.
+func oomMessage(ru *ResourceUsage) string {
+	if ru == nil {
+		return ""
+	}
+	children := ru.ContainerMemoryOOMKillCount != nil && *ru.ContainerMemoryOOMKillCount > 0
+	if !ru.OOMKilled && !children {
+		return ""
+	}
+	var msg string
+	if ru.OOMKilled {
+		msg = "the task's main process was killed"
+	} else {
+		msg = fmt.Sprintf("%d process(es) in the task's container were killed", *ru.ContainerMemoryOOMKillCount)
+	}
+	msg = "[sprinkles] Out of memory: " + msg + " because the container exhausted its memory"
+	if ru.ContainerMemoryLimitBytes != nil && *ru.ContainerMemoryLimitBytes > 0 {
+		msg += fmt.Sprintf(" (limit %.2f GiB", float64(*ru.ContainerMemoryLimitBytes)/(1<<30))
+		if ru.ContainerMemoryPeakBytes != nil {
+			msg += fmt.Sprintf(", peak %.2f GiB", float64(*ru.ContainerMemoryPeakBytes)/(1<<30))
+		}
+		msg += ")"
+	}
+	return msg + ". Consider requesting more memory for this job.\n"
+}
+
 // dockerState is the subset of `docker inspect .State` we care about.
 type dockerState struct {
 	StartedAt  time.Time `json:"StartedAt"`
