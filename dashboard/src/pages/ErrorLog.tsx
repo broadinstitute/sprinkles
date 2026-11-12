@@ -3,9 +3,25 @@ import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { RefreshToggle } from "../components/RefreshControls";
 import type { ErrorLogEntry } from "../types";
+import ErrorLogList from "../components/ErrorLogList";
 
 const MONO = "'IBM Plex Mono', monospace";
 const POLL_INTERVAL_MS = 30_000;
+
+// Saves the current errors as a plain-text file, one "[timestamp] message"
+// entry per line (multi-line messages keep their own line breaks).
+function downloadLog(errors: ErrorLogEntry[]) {
+  const text =
+    errors.map((e) => `[${e.timestamp}] ${e.message}`).join("\n") + "\n";
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `sprinkles-error-log-${new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function ErrorLog() {
   const [errors, setErrors] = useState<ErrorLogEntry[]>([]);
@@ -88,11 +104,30 @@ export default function ErrorLog() {
         >
           Error Log
         </h1>
-        <RefreshToggle
-          live={!paused}
-          onToggle={() => setPaused((p) => !p)}
-          lastUpdatedAt={lastUpdatedAt}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+          <button
+            type="button"
+            onClick={() => downloadLog(errors)}
+            disabled={errors.length === 0}
+            style={{
+              fontFamily: MONO,
+              fontSize: "0.8rem",
+              padding: "4px 10px",
+              border: "1px solid #ccc",
+              borderRadius: 4,
+              background: "white",
+              cursor: errors.length === 0 ? "not-allowed" : "pointer",
+              opacity: errors.length === 0 ? 0.5 : 1,
+            }}
+          >
+            Download log
+          </button>
+          <RefreshToggle
+            live={!paused}
+            onToggle={() => setPaused((p) => !p)}
+            lastUpdatedAt={lastUpdatedAt}
+          />
+        </div>
       </div>
       <p
         style={{
@@ -107,52 +142,7 @@ export default function ErrorLog() {
         etc.), polled every 30s.
       </p>
 
-      <div
-        style={{
-          border: "1px solid #e0e0e0",
-          borderRadius: 8,
-          background: "#282c34",
-          height: "70vh",
-          overflowY: "auto",
-          fontSize: "0.82rem",
-          lineHeight: 1.6,
-          boxSizing: "border-box",
-        }}
-      >
-        {loading ? (
-          <div
-            style={{ padding: "1rem", color: "#5c6370", fontStyle: "italic" }}
-          >
-            Loading…
-          </div>
-        ) : errors.length === 0 ? (
-          <div
-            style={{ padding: "1rem", color: "#5c6370", fontStyle: "italic" }}
-          >
-            No errors recorded.
-          </div>
-        ) : (
-          errors.map((e, i) => (
-            <div
-              key={`${e.timestamp}-${i}`}
-              style={{
-                display: "flex",
-                gap: "1rem",
-                padding: "6px 16px",
-                borderBottom:
-                  i < errors.length - 1 ? "1px solid #3a3f4b" : "none",
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              <span style={{ color: "#5c6370", whiteSpace: "nowrap" }}>
-                {new Date(e.timestamp).toLocaleString()}
-              </span>
-              <span style={{ color: "#e06c75" }}>{e.message}</span>
-            </div>
-          ))
-        )}
-        <div ref={bottomRef} />
-      </div>
+      <ErrorLogList errors={errors} loading={loading} bottomRef={bottomRef} />
 
       <div style={{ marginTop: "1.5rem" }}>
         <Link
